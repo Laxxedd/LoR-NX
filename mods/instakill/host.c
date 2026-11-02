@@ -1,10 +1,11 @@
-// Mod "instakill": every librarian (Player faction) die rolls and deals the 32-bit integer limit (2147483647), as host callbacks on observation gates.
+// Mod "instakill": every librarian (Player faction) die rolls and deals 999, as host callbacks on observation gates.
 //   final_value_post  x19 = BattleDiceBehavior  (UpdateDiceFinalValue epilogue; get_DiceResultValue reads _diceFinalResultValue, DiceVanillaValue reads _diceResultValue)
 //   give_damage_post  x19 = BattleDiceBehavior  (GiveDamage, after _diceResultDamage / _diceDamageAll are stored)
 // A die belongs to a librarian when dice.card.owner.faction == Faction.Player (1); enemies (Faction.Enemy = 0) are untouched.
-//   final_value_post: _diceResultValue and _diceFinalResultValue = INT_MAX, so the roll wins every clash and feeds the game's own damage code with INT_MAX.
-//   give_damage_post: _diceResultDamage and _diceDamageAll = INT_MAX (the damage the game's own code applies comes from the INT_MAX roll;
-//                     no extra TakeDamage call: a second hit on a target the game is already killing ran the death twice and crashed a Unity job thread about 0.5 s later)
+//   final_value_post: _diceResultValue and _diceFinalResultValue = 999, so the roll wins every clash and feeds the game's own damage code with 999.
+//   give_damage_post: _diceResultDamage and _diceDamageAll = 999 (the damage the game's own code applies comes from the 999 roll;
+//                     no extra TakeDamage call: a second hit on a target the game is already killing ran the death twice)
+// Why not INT_MAX: an overkill of ~2 billion fed the kill effects (DamagedBloodEffect / DamagedEffectManager scale with damage and the victim's remaining HP) and the Unity particle/job allocations ran the 4 GB alias region dry within a second; ALLOC_DEFAULT then returned null and a Unity job worker crashed in a memcpy to address 0, about 0.5 s after the kill.
 // Off by default: DM_MOD_INSTAKILL=1 turns the callbacks on (the launcher's Mods > instakill switch, or env.txt). The gates are always in the code and pass through while it is off.
 #include "dm.h"
 #include "hle_mods_gen.h"
@@ -20,7 +21,7 @@ void dm_mod_gate_run(uint64_t *regs, int param, void (*fn)(uint64_t *, int));
 #define F_UNIT_FACTION 0x60                    // BattleUnitModel.faction
 
 #define FACTION_PLAYER 1                       // Faction: Enemy 0, Player 1
-#define INT_LIMIT 2147483647
+#define DICE_VALUE 999
 
 static uint8_t *s_main;
 static int g_hits[2];
@@ -50,9 +51,9 @@ static void final_value_run(uint64_t *r, int param) {
     (void)param;
     void *die = (void *)r[19];
     if (!librarian_owner(die)) return;
-    *(int *)((uintptr_t)die + F_DICE_RESULT_VALUE) = INT_LIMIT;
-    *(int *)((uintptr_t)die + F_DICE_FINAL_VALUE) = INT_LIMIT;
-    if (first_hits(0)) LOG("[mod instakill] %s: die %#llx rolls %d", g_gate_name[0], (unsigned long long)(uintptr_t)die, INT_LIMIT);
+    *(int *)((uintptr_t)die + F_DICE_RESULT_VALUE) = DICE_VALUE;
+    *(int *)((uintptr_t)die + F_DICE_FINAL_VALUE) = DICE_VALUE;
+    if (first_hits(0)) LOG("[mod instakill] %s: die %#llx rolls %d", g_gate_name[0], (unsigned long long)(uintptr_t)die, DICE_VALUE);
 }
 
 static void give_damage_run(uint64_t *r, int param) {
@@ -60,9 +61,9 @@ static void give_damage_run(uint64_t *r, int param) {
     void *die = (void *)r[19];
     void *owner = librarian_owner(die);
     if (!owner) return;
-    *(int *)((uintptr_t)die + F_DICE_RESULT_DAMAGE) = INT_LIMIT;
-    *(int *)((uintptr_t)die + F_DICE_DAMAGE_ALL) = INT_LIMIT;
-    if (first_hits(1)) LOG("[mod instakill] %s: die %#llx deals %d", g_gate_name[1], (unsigned long long)(uintptr_t)die, INT_LIMIT);
+    *(int *)((uintptr_t)die + F_DICE_RESULT_DAMAGE) = DICE_VALUE;
+    *(int *)((uintptr_t)die + F_DICE_DAMAGE_ALL) = DICE_VALUE;
+    if (first_hits(1)) LOG("[mod instakill] %s: die %#llx deals %d", g_gate_name[1], (unsigned long long)(uintptr_t)die, DICE_VALUE);
 }
 
 // Read once, at the first gate hit: the launcher's choices are in the environment by then, but not yet when constructors run
