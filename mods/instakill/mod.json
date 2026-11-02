@@ -1,7 +1,7 @@
 {
   "id": "instakill",
   "title": "Instakill (Library of Ruina)",
-  "description": "Every librarian (Player faction) die rolls 2147483647 and deals 2147483647 damage, as host callbacks on observation gates. For Library of Ruina 1.0.3.",
+  "description": "Every librarian (Player faction) die rolls 2147483647 and its damage fields are set to 2147483647, as host callbacks on observation gates. For Library of Ruina 1.0.3.",
   "launcher": {
     "env": "DM_MOD_INSTAKILL",
     "label": "instakill",
@@ -26,7 +26,7 @@
         "gate": "give_damage_post",
         "offset": "0x2450b08",
         "word": "f9401268",
-        "reason": "BattleDiceBehavior.GiveDamage, right after stp w25,w8,[x19,#84] stores _diceResultDamage / _diceDamageAll: x19 = the BattleDiceBehavior, x28 -> the target BattleUnitModel (ldr x2,[x28] as at 0x2450a70)"
+        "reason": "BattleDiceBehavior.GiveDamage, right after stp w25,w8,[x19,#84] stores _diceResultDamage / _diceDamageAll: x19 = the BattleDiceBehavior"
       }
     ]
   }

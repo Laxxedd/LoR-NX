@@ -1,18 +1,15 @@
 // Mod "instakill": every librarian (Player faction) die rolls and deals the 32-bit integer limit (2147483647), as host callbacks on observation gates.
 //   final_value_post  x19 = BattleDiceBehavior  (UpdateDiceFinalValue epilogue; get_DiceResultValue reads _diceFinalResultValue, DiceVanillaValue reads _diceResultValue)
-//   give_damage_post  x19 = BattleDiceBehavior, x28 -> target  (GiveDamage, after _diceResultDamage / _diceDamageAll are stored)
+//   give_damage_post  x19 = BattleDiceBehavior  (GiveDamage, after _diceResultDamage / _diceDamageAll are stored)
 // A die belongs to a librarian when dice.card.owner.faction == Faction.Player (1); enemies (Faction.Enemy = 0) are untouched.
 //   final_value_post: _diceResultValue and _diceFinalResultValue = INT_MAX, so the roll wins every clash and feeds the game's own damage code with INT_MAX.
-//   give_damage_post: _diceResultDamage and _diceDamageAll = INT_MAX, and when the target is still alive after the game's own damage (an immunity, a shield or an overflowed sum),
-//                     BattleUnitModel.TakeDamage(INT_MAX) on it, so the hit does the full amount whatever the game's arithmetic left.
+//   give_damage_post: _diceResultDamage and _diceDamageAll = INT_MAX (the damage the game's own code applies comes from the INT_MAX roll;
+//                     no extra TakeDamage call: a second hit on a target the game is already killing ran the death twice and crashed a Unity job thread about 0.5 s later)
 // Off by default: DM_MOD_INSTAKILL=1 turns the callbacks on (the launcher's Mods > instakill switch, or env.txt). The gates are always in the code and pass through while it is off.
 #include "dm.h"
 #include "hle_mods_gen.h"
 
 void dm_mod_gate_run(uint64_t *regs, int param, void (*fn)(uint64_t *, int));
-
-#define K_UNIT_IS_DEAD 0x1EEEF80u              // BattleUnitBaseModel.IsDead
-#define K_UNIT_TAKE_DAMAGE 0x1EFBE90u          // BattleUnitModel.TakeDamage(int v, DamageType type, BattleUnitModel attacker, KeywordBuf keyword)
 
 #define F_DICE_CARD 0x20                       // BattleDiceBehavior.card
 #define F_DICE_RESULT_VALUE 0x30               // BattleDiceBehavior._diceResultValue (int)
@@ -23,7 +20,6 @@ void dm_mod_gate_run(uint64_t *regs, int param, void (*fn)(uint64_t *, int));
 #define F_UNIT_FACTION 0x60                    // BattleUnitModel.faction
 
 #define FACTION_PLAYER 1                       // Faction: Enemy 0, Player 1
-#define DAMAGETYPE_ATTACK 0                    // DamageType.Attack
 #define INT_LIMIT 2147483647
 
 static uint8_t *s_main;
@@ -66,12 +62,7 @@ static void give_damage_run(uint64_t *r, int param) {
     if (!owner) return;
     *(int *)((uintptr_t)die + F_DICE_RESULT_DAMAGE) = INT_LIMIT;
     *(int *)((uintptr_t)die + F_DICE_DAMAGE_ALL) = INT_LIMIT;
-    void **cell = (void **)r[28];
-    void *target = cell ? *cell : NULL;
-    if (!target || !main_base()) return;
-    if (!FN(K_UNIT_IS_DEAD, int, void *, const void *)(target, NULL) && *(int *)((uintptr_t)target + F_UNIT_FACTION) != FACTION_PLAYER)
-        FN(K_UNIT_TAKE_DAMAGE, int, void *, int, int, void *, int, const void *)(target, INT_LIMIT, DAMAGETYPE_ATTACK, owner, 0, NULL);
-    if (first_hits(1)) LOG("[mod instakill] %s: die %#llx deals %d to %#llx", g_gate_name[1], (unsigned long long)(uintptr_t)die, INT_LIMIT, (unsigned long long)(uintptr_t)target);
+    if (first_hits(1)) LOG("[mod instakill] %s: die %#llx deals %d", g_gate_name[1], (unsigned long long)(uintptr_t)die, INT_LIMIT);
 }
 
 // Read once, at the first gate hit: the launcher's choices are in the environment by then, but not yet when constructors run
