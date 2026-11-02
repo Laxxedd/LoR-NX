@@ -1,0 +1,33 @@
+{
+  "id": "instakill",
+  "title": "Instakill (Library of Ruina)",
+  "description": "Every librarian (Player faction) die rolls 2147483647 and deals 2147483647 damage, as host callbacks on observation gates. For Library of Ruina 1.0.3.",
+  "launcher": {
+    "env": "DM_MOD_INSTAKILL",
+    "label": "instakill",
+    "note": "all librarians have their dice rolls and damage set to the 32bit integer limit"
+  },
+  "game": "Library of Ruina 1.0.3",
+  "gates": [
+    "final_value_post",
+    "give_damage_post"
+  ],
+  "host": "host.c",
+  "obs": {
+    "_comment": "main build ID (first 16 bytes of the module ID, 32 hex digits) -> rows {gate, offset, word, reason}; word = the 4 bytes at offset read as a little-endian u32. Offsets are the RVAs of dump.cs (main = RVA + 0x234000 in the DmIOS file); words read from that file.",
+    "aeea627ddbd1214764dfef5f965e94a2": [
+      {
+        "gate": "final_value_post",
+        "offset": "0x244e998",
+        "word": "a9444ff4",
+        "reason": "BattleDiceBehavior.UpdateDiceFinalValue epilogue (every path that stores _diceFinalResultValue at 0x244e980 reaches it, and so do the early exits): x19 = the BattleDiceBehavior"
+      },
+      {
+        "gate": "give_damage_post",
+        "offset": "0x2450b08",
+        "word": "f9401268",
+        "reason": "BattleDiceBehavior.GiveDamage, right after stp w25,w8,[x19,#84] stores _diceResultDamage / _diceDamageAll: x19 = the BattleDiceBehavior, x28 -> the target BattleUnitModel (ldr x2,[x28] as at 0x2450a70)"
+      }
+    ]
+  }
+}
