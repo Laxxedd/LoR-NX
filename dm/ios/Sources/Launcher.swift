@@ -97,7 +97,7 @@ private struct LauncherView: View {
     @State private var memory = os_proc_available_memory()
     @State private var editingSwipeLayout = false
 
-    // Opens the layout editor of the Swipe touch layout (GestureLayoutEditor.swift). The layout itself is chosen in the game, with the button at the top centre
+    // Opens the layout editor of the Swipe touch layout (GestureLayoutEditor.swift). It is the only touch layout
     private var swipeEditorButton: some View {
         Button { editingSwipeLayout = true } label: {
             HStack {
