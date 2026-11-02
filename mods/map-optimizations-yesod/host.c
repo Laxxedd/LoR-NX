@@ -4,6 +4,10 @@
 //   DM_MOD_YESOD_GEARSPARKS  the 13 gear sparks (YesodMapManager._gearParticles), default off
 //   DM_MOD_YESOD_SMOKE       the background smoke (_groundParticle), default on
 //   DM_MOD_YESOD_SCREENSPARKS the screen sparks (the root object "spark_g1 (2)"), default on
+// Layer switches for finding what costs GPU time (1 = shown, 0 = hidden), all default on:
+//   DM_MOD_YESOD_BUILDINGS   the building sprites (_spriteBuildingList)
+//   DM_MOD_YESOD_BGLAYERS    the background sprite layers (_spriteList, each one's transform object)
+//   DM_MOD_YESOD_GEARS       the gear objects (_gearList)
 // The game switches them back on in three places, so each is followed by the same clean-up:
 //   start_pre    YesodMapManager.Start entry (x0 = the map)
 //   enable_pre   MapManager.EnableMap entry (x0 = the map): remembered
@@ -27,6 +31,12 @@ void dm_mod_gate_run(uint64_t *regs, int param, void (*fn)(uint64_t *, int));
 #define F_ARRAY_DATA 0x20
 #define F_MAP_SEPHIRAH 0x30                     // MapManager.sephirahType
 #define F_MAP_ROOTS 0x60                        // MapManager._roots (GameObject[])
+#define F_LIST_ITEMS 0x10                       // List<T>._items
+#define F_LIST_SIZE 0x18                        // List<T>._size
+#define F_YESOD_GEAR_LIST 0xB8                  // YesodMapManager._gearList (List<MapBgObjRotator>)
+#define F_YESOD_BUILDING_LIST 0xC0              // YesodMapManager._spriteBuildingList (List<SpriteRenderer>)
+#define F_YESOD_SPRITE_LIST 0xC8                // YesodMapManager._spriteList (List<YesodSpriteBG>)
+#define F_YESODBG_TRANSFORM 0x28                // YesodSpriteBG.transform
 #define F_YESOD_GEAR_PARTICLES 0xD0             // YesodMapManager._gearParticles (ParticleSystem[])
 #define F_YESOD_GROUND_PARTICLE 0xE8            // YesodMapManager._groundParticle (GameObject)
 #define SCREEN_SPARKS_NAME "spark_g1 (2)"
@@ -76,8 +86,23 @@ static void deactivate(void *game_object) {
     if (game_object) FN(K_GAMEOBJECT_SET_ACTIVE, void, void *, int, const void *)(game_object, 0, NULL);
 }
 
+static void hide_list(void *list, uintptr_t member_off, int via_transform) {
+    void *items = field(list, F_LIST_ITEMS);
+    int n = field_int(list, F_LIST_SIZE);
+    int cap = field_int(items, F_ARRAY_LENGTH);
+    if (n > cap) n = cap;
+    for (int i = 0; i < n; i++) {
+        void *e = *(void *const *)((uintptr_t)items + F_ARRAY_DATA + sizeof(void *) * (size_t)i);
+        if (e && via_transform) e = field(e, member_off);
+        if (e) deactivate(FN(K_COMPONENT_GET_GAMEOBJECT, void *, void *, const void *)(e, NULL));
+    }
+}
+
 static void clean_map(void *map) {
     if (!is_instance_of(map, "YesodMapManager")) return;
+    if (!setting("DM_MOD_YESOD_BUILDINGS", 1)) hide_list(field(map, F_YESOD_BUILDING_LIST), 0, 0);
+    if (!setting("DM_MOD_YESOD_BGLAYERS", 1)) hide_list(field(map, F_YESOD_SPRITE_LIST), F_YESODBG_TRANSFORM, 1);
+    if (!setting("DM_MOD_YESOD_GEARS", 1)) hide_list(field(map, F_YESOD_GEAR_LIST), 0, 0);
     if (!setting("DM_MOD_YESOD_GEARSPARKS", 0)) {
         void *arr = field(map, F_YESOD_GEAR_PARTICLES);
         int n = field_int(arr, F_ARRAY_LENGTH);
