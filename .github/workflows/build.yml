@@ -4,28 +4,28 @@ on:
   workflow_dispatch:
     inputs:
       app_name:
-        description: "Home-screen name (optional)"
+        description: "CFBundleDisplayName"
         required: false
         type: string
       extra_args:
-        description: "Extra build_ipa_from_nsp.py options, e.g. --romfs separate  or  -p v0"
+        description: "Additional parameters"
         required: false
         type: string
       romfs_mode:
-        description: "separate = leave the game files out of the IPA (copy your own romfs.img to the phone); bundle = pack them in"
+        description: "upload type"
         required: true
-        default: separate
+        default: headless
         type: choice
         options:
-          - separate
+          - headless
           - bundle
       refresh_cache:
-        description: "Ignore the cached game files and download them again"
+        description: "Ignore cache downloads"
         required: true
         default: false
         type: boolean
       encrypt:
-        description: "Put the IPA in a password-protected .7z (keep on for a public repo)"
+        description: "Encrypt archive"
         required: true
         default: true
         type: boolean
@@ -34,8 +34,6 @@ permissions:
   contents: read
 
 env:
-  # Same toolchain as the project's own CI (tests.yml): the runner image named xcode-27, Xcode 27.1 picked by path.
-  # The build refuses another Metal compiler than the one in dm/gfx/tools/dmsh_chain.lock.
   DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
   UPLOAD_URL: ${{ secrets.UPLOAD_URL }}
   ASTCENC_TAG: "5.7.0"
@@ -301,7 +299,7 @@ jobs:
           key: nxshader-v1-${{ steps.links.outputs.hash }}-${{ hashFiles('dm/gfx/**', 'dm/games/**', 'scripts/build_ipa_from_nsp.py') }}
 
       - name: Show RomFS image identity
-        if: ${{ success() && inputs.romfs_mode == 'separate' }}
+        if: ${{ success() && inputs.romfs_mode == 'headless' }}
         run: |
           set -eo pipefail
           for img in "$HOME"/work/extract/*/RomFS.img; do
@@ -327,10 +325,6 @@ jobs:
             cp "$HOME/game/nxnative.ipa" "$HOME/out/nxnative.ipa"
             echo "OUT_FILE=$HOME/out/nxnative.ipa" >> "$GITHUB_ENV"
           fi
-
-      - name: Upload to your own server (optional)
-        if: ${{ env.UPLOAD_URL != '' }}
-        run: curl -fsS --retry 3 -T "$OUT_FILE" "$UPLOAD_URL"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
