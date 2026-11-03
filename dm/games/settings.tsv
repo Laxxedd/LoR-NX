@@ -32,3 +32,5 @@ DM_PSO_PREBUILD	toggle	-	1	gfxapi:nvn	Performance	Pipeline prebuild	The first st
 DM_NVN_ENC_THREAD	toggle	-	1|DM_GAME_ENC_THREAD	gfxapi:nvn	Performance	Encode thread
 DM_FPS_HOLD	toggle	on/off	DM_GAME_FPS_HOLD	DM_GAME_FPS_TARGET!=0	Performance	Hold frames when late
 DM_METAL_HUD	toggle	-	0	always	Performance	Performance HUD
+DM_RAM_EXTEND	toggle	-	0	platform:ios	Memory	Extend Memory Usage	Offload the app's memory to its Appex. so it doesn't count towards the limit. May cause instability, only use when necessary.
+DM_RAM_REALLOC_MIN	choice	262144=256 kB,65536=64 kB,16384=16 kB,0=None	262144	platform:ios	Memory	Reallocate Minimum	Filter which memory regions get reallocated, lower thresholds will reallocate more memory, but may come at the cost of stability.

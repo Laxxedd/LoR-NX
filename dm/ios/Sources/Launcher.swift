@@ -95,6 +95,9 @@ private struct LauncherView: View {
     @ObservedObject var m: LauncherModel
     let play: () -> Void
     @State private var memory = os_proc_available_memory()
+    private let increasedLimit = dm_has_increased_memory_entitlement()   // fixed for the life of the process
+    private let donorEmbedded = dm_ram_donor_embedded()
+    private static let memorySection = "Memory"
     @State private var editingSwipeLayout = false
     @State private var modPage: [String] = []   // the open mod settings page (a mod's env): the navigation stack's path
 
@@ -106,6 +109,36 @@ private struct LauncherView: View {
                 Spacer()
                 Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
             }
+        }
+    }
+
+    // The sections in the order shown: the list's own, with Memory right above Mods (last when the game has no mods). Memory always draws its two readouts, even when the list has no rows for it
+    private var sectionOrder: [String] {
+        var order = m.sections.filter { $0 != Self.memorySection }
+        order.insert(Self.memorySection, at: order.firstIndex(of: LauncherModel.modsSection) ?? order.count)
+        return order
+    }
+
+    private var memorySection: some View {
+        Section {
+            HStack {
+                Text("Memory available")
+                Spacer()
+                Text(ByteCountFormatter.string(fromByteCount: Int64(memory), countStyle: .memory)).monospacedDigit().foregroundStyle(.secondary)
+            }
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Increased memory limit")
+                    Text("com.apple.developer.kernel.increased-memory-limit").font(.footnote).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(increasedLimit ? "Yes" : "No").fontWeight(.semibold).foregroundStyle(increasedLimit ? Color.green : Color.red)
+            }
+            ForEach(m.topRows(in: Self.memorySection)) { s in SettingRow(s: s, m: m) }
+        } header: {
+            Text(Self.memorySection)
+        } footer: {
+            if !donorEmbedded { Text("This build has no LoRRamDonor extension, so Extend Memory Usage has no effect.") }
         }
     }
 
@@ -132,16 +165,20 @@ private struct LauncherView: View {
                 .frame(width: geometry.size.width / 3, height: geometry.size.height)
                 NavigationStack(path: $modPage) {
                     List {
-                        ForEach(m.sections, id: \.self) { section in
-                            let rows = m.topRows(in: section)
-                            if !rows.isEmpty {
-                                Section(section) {
-                                    ForEach(rows) { s in
-                                        // a mod with settings of its own: a row with a chevron that opens them on their own page
-                                        if m.modSettings(of: s).isEmpty { SettingRow(s: s, m: m) }
-                                        else { ModEntryRow(s: s, m: m) { modPage.append(s.env) } }
+                        ForEach(sectionOrder, id: \.self) { section in
+                            if section == Self.memorySection {
+                                memorySection
+                            } else {
+                                let rows = m.topRows(in: section)
+                                if !rows.isEmpty {
+                                    Section(section) {
+                                        ForEach(rows) { s in
+                                            // a mod with settings of its own: a row with a chevron that opens them on their own page
+                                            if m.modSettings(of: s).isEmpty { SettingRow(s: s, m: m) }
+                                            else { ModEntryRow(s: s, m: m) { modPage.append(s.env) } }
+                                        }
+                                        if section == "Controls" { swipeEditorButton }
                                     }
-                                    if section == "Controls" { swipeEditorButton }
                                 }
                             }
                         }
@@ -155,13 +192,6 @@ private struct LauncherView: View {
                             Text("Brings back all settings this game was tested with.")
                         }
                         CloudSavesSection()
-                        Section {
-                            HStack {
-                                Text("Memory available")
-                                Spacer()
-                                Text(ByteCountFormatter.string(fromByteCount: Int64(memory), countStyle: .memory)).monospacedDigit().foregroundStyle(.secondary)
-                            }
-                        }
                     }
                     .listStyle(.insetGrouped)
                     .contentMargins(.horizontal, 12, for: .scrollContent)

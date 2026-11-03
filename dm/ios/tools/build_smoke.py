@@ -32,7 +32,7 @@ def main():
     gen = project / 'Gen'
     tables = gen / 'dm'
     tables.mkdir(parents=True)
-    for name in ('Sources', 'tools'):
+    for name in ('Sources', 'Extension', 'tools'):
         (project / name).symlink_to(ios / name, target_is_directory=True)
     shutil.copyfile(ios / 'project.yml', project / 'project.yml')
     assets = gen / 'Assets.xcassets'

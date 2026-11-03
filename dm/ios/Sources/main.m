@@ -13,6 +13,7 @@
 #include "romfs_image.h"
 #include "romfs_identity.h"
 #include "player_env.h"
+#import "DonatedHeap.h"
 #ifndef DM_PLAYER_BUILD
 #define DM_PLAYER_BUILD 0
 #endif
@@ -187,6 +188,7 @@ static void *boot_thread(void *p) {
 }
 void front_ios_boot(void) {   // Called by front_ios.m once the window and Metal view exist
     static int once; if (once++ || !g_boot_ok) return;
+    rd_ram_register_guest_hook();   // the host offers the guest block to the memory donor when it is set up, if the launcher turned Extend Memory Usage on (DonatedHeap.m)
     void front_ios_audio_session(void); front_ios_audio_session();   // set a short I/O buffer before the game opens audio output (front_ios.m)
     pthread_attr_t a; pthread_attr_init(&a); pthread_attr_setstacksize(&a, 64u << 20);   // the Switch main thread stack is set by npdm; the host gives plenty
     pthread_t t; pthread_create(&t, &a, boot_thread, NULL); pthread_detach(t);
