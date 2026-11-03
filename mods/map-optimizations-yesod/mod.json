@@ -8,13 +8,14 @@
     "note": "Several optimization improvements to Yesod’s Floor. Original mod by [uGuardian’s Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=2798869790)"
   },
   "settings": [
-    {"env": "DM_MOD_YESOD_GEARSPARKS", "kind": "toggle", "label": "Gear sparks", "note": "On shows the sparks of the turning gears, off removes them. Off saves the most.", "default": "0"},
-    {"env": "DM_MOD_YESOD_SMOKE", "kind": "toggle", "label": "Background smoke", "note": "On shows the smoke on the ground of the floor, off removes it.", "default": "1"},
-    {"env": "DM_MOD_YESOD_SCREENSPARKS", "kind": "toggle", "label": "Screen sparks", "note": "On shows the sparks that fly across the screen, off removes them.", "default": "1"},
-    {"env": "DM_MOD_YESOD_BUILDINGS", "kind": "toggle", "label": "Building sprites", "note": "On shows the buildings of the background, off hides them.", "default": "1"},
-    {"env": "DM_MOD_YESOD_BGLAYERS", "kind": "toggle", "label": "Background layers", "note": "On shows the scrolling background sprite layers, off hides them.", "default": "1"},
-    {"env": "DM_MOD_YESOD_GEARS", "kind": "toggle", "label": "Gears", "note": "On shows the turning gears, off hides them.", "default": "1"}
+    {"env": "DM_MOD_YESOD_GEARSPARKS", "kind": "toggle", "on": "0", "off": "1", "label": "Disable gear sparks", "note": "The sparks of the turning gears. Saves the most.", "default": "0"},
+    {"env": "DM_MOD_YESOD_SMOKE", "kind": "toggle", "on": "0", "off": "1", "label": "Disable background smoke", "note": "The smoke on the ground of the floor.", "default": "1"},
+    {"env": "DM_MOD_YESOD_SCREENSPARKS", "kind": "toggle", "on": "0", "off": "1", "label": "Disable screen sparks", "note": "The sparks that fly across the screen.", "default": "1"},
+    {"env": "DM_MOD_YESOD_BUILDINGS", "kind": "toggle", "on": "0", "off": "1", "label": "Disable building sprites", "note": "The buildings of the background.", "default": "1"},
+    {"env": "DM_MOD_YESOD_BGLAYERS", "kind": "toggle", "on": "0", "off": "1", "label": "Disable background layers", "note": "The scrolling background sprite layers.", "default": "1"},
+    {"env": "DM_MOD_YESOD_GEARS", "kind": "toggle", "on": "0", "off": "1", "label": "Disable gears", "note": "The turning gears of the floor.", "default": "1"}
   ],
+
   "game": "Library of Ruina 1.0.3",
   "gates": ["start_pre", "enable_pre", "enable_ret1", "enable_ret2", "quake_post"],
   "host": "host.c",

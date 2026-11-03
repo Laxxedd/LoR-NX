@@ -1,6 +1,6 @@
 // Mod "enhanced-combat-page-view": Cyaminthe's Enhanced Combat Page View (Steam Workshop 2802216129), as a host callback on an observation gate.
 // The PC mod scales BattleDiceCardUI.vibeRect (a child RectTransform) of the card under the cursor between 1.0 and 1.75, and moves it by sizeDelta * (scale - 1) / 2 so the page grows away from its anchor.
-// Here every page in the hand gets the same scale (DM_MOD_ECPV_ZOOM, percent, 100 to 175, default 125: 25% bigger), selected or not, so there is no selection state to follow and nothing to undo:
+// Here every page in the hand gets the same scale (DM_MOD_ECPV_ZOOM, a multiplier, 1.00 to 1.75, default 1.25: 25% bigger; a value of 10 or more is read as the old percentage, 125 = x1.25), selected or not, so there is no selection state to follow and nothing to undo:
 //   update_pre   BattleUnitCardsInHandUI.Update entry (once a frame, x0 = the hand): vibeRect of every page in _cardList gets the scale and the offset (a page that is vibrating is skipped)
 // Not ported: hands of more than 10 pages (the PC mod adds card UI objects), the 65 to 60 rotation constant, and the mouse wheel.
 // Off by default: DM_MOD_ECPV=1 turns the callback on (the launcher's Mods > Enhanced Combat Page View switch, or env.txt). The gate is always in the code and passes through while it is off.
@@ -41,11 +41,12 @@ static float zoom(void) {
     static float z = 0;
     if (z <= 0) {
         const char *v = getenv("DM_MOD_ECPV_ZOOM");
-        int pct = v && v[0] ? atoi(v) : 125;
-        if (pct < 100) pct = 100;
-        if (pct > 175) pct = 175;
-        z = (float)pct / 100.0f;
-        LOG("[mod enhanced-combat-page-view] zoom %d%% (DM_MOD_ECPV_ZOOM=%s)", pct, v ? v : "unset");
+        double m = v && v[0] ? atof(v) : 1.25;
+        if (m >= 10.0) m /= 100.0;   // the old percentage (125): an env.txt written for it still works
+        if (m < 1.0) m = 1.0;
+        if (m > 1.75) m = 1.75;
+        z = (float)m;
+        LOG("[mod enhanced-combat-page-view] zoom x%.2f (DM_MOD_ECPV_ZOOM=%s)", m, v ? v : "unset");
     }
     return z;
 }

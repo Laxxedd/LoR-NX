@@ -12,6 +12,7 @@ struct Setting: Decodable, Identifiable {
     let options: [[String]]?   // choice: [value, label]
     let min, max, step: Double?   // range
     let on, off: String?   // toggle: the values the variable takes (1 / 0 when not given)
+    let format: String?    // range: "multiplier" shows the value as x1.25 instead of a percentage
     var id: String { env }
     var sectionTitle: String { section ?? "Game" }
     var basic: Bool { level == "basic" }
@@ -30,7 +31,7 @@ struct Setting: Decodable, Identifiable {
         default: return true
         }
     }
-    enum CodingKeys: String, CodingKey { case env, kind, label, note, def = "default", section, needs, level, base, options, min, max, step, on, off }
+    enum CodingKeys: String, CodingKey { case env, kind, label, note, def = "default", section, needs, level, base, options, min, max, step, on, off, format }
 }
 struct SettingsFile: Decodable { let settings: [Setting] }
 
@@ -71,6 +72,17 @@ final class LauncherModel: ObservableObject {
         return v == want
     }
     func rows(in section: String) -> [Setting] { settings.filter { $0.sectionTitle == section && visible($0) } }
+
+    // Mods with their own settings: a row of the Mods section that names another Mods row in "needs" (scripts/apply_mods.py: a mod's settings need its switch) is a setting of that mod.
+    // The iPhone launcher keeps those on a page of their own, opened from the mod's row (LauncherView); the Mac window still lists them under the mod
+    static let modsSection = "Mods"
+    func modEnv(of s: Setting) -> String? {
+        guard s.sectionTitle == Self.modsSection, let n = s.needs, let eq = n.firstIndex(of: "=") else { return nil }
+        let key = String(n[n.startIndex..<eq])
+        return settings.contains { $0.env == key && $0.sectionTitle == Self.modsSection } ? key : nil
+    }
+    func modSettings(of mod: Setting) -> [Setting] { settings.filter { modEnv(of: $0) == mod.env } }   // all of them, shown or not
+    func topRows(in section: String) -> [Setting] { rows(in: section).filter { modEnv(of: $0) == nil } }   // the list's rows without a mod's own settings
     // The Mac window: Basic settings first, then Advanced settings, each in the list's sections and order
     func sections(basic: Bool) -> [String] {
         settings.filter { $0.basic == basic }.reduce(into: []) { if !$0.contains($1.sectionTitle) { $0.append($1.sectionTitle) } }
@@ -78,6 +90,7 @@ final class LauncherModel: ObservableObject {
     func rows(in section: String, basic: Bool) -> [Setting] { rows(in: section).filter { $0.basic == basic } }
     // A range's label: its percentage, with the size in pixels for the chosen console mode when the list has the base size (the render scale)
     func rangeLabel(_ s: Setting, _ v: Double) -> String {
+        if s.format == "multiplier" { return String(format: "x%.2f", v) }
         let p = "\(Int((v * 100).rounded())) %"
         guard let b = s.base else { return p }
         let size = (values["DM_OPMODE"] ?? "1") == "0" ? b.handheld : b.docked

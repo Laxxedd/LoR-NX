@@ -58,3 +58,61 @@ struct SettingRow: View {
         .disabled(locked)
     }
 }
+
+#if os(iOS)   // the iPhone launcher only: the Mac window lists a mod's settings under it
+// A mod with settings of its own, in the Mods section: its switch, and a chevron that opens its settings page (ModSettingsPage). Tapping the switch only turns the mod on or off;
+// tapping anywhere else on the row (the chevron included) opens the page. A tap gesture, not a Button: the mod's note holds a link to the original mod, which must still open
+struct ModEntryRow: View {
+    let s: Setting
+    @ObservedObject var m: LauncherModel
+    let open: () -> Void
+
+    private var locked: Bool { m.fixed.contains(s.env) }
+    private var note: String {
+        guard locked else { return s.note }
+        return (s.note.isEmpty ? "" : s.note + " · ") + (m.fromLaunch.contains(s.env) ? "Set at launch" : "Set by an env file")
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(s.label)
+                if !note.isEmpty { Text(LocalizedStringKey(note)).font(.footnote).foregroundStyle(.secondary) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture(perform: open)
+            Toggle(s.label, isOn: Binding(get: { (m.values[s.env] ?? s.def) == s.onValue }, set: { m.values[s.env] = $0 ? s.onValue : s.offValue }))
+                .labelsHidden()
+                .disabled(locked)
+            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                .contentShape(Rectangle())
+                .onTapGesture(perform: open)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityAction(named: "Open settings", open)
+    }
+}
+
+// The page of one mod's settings, pushed from its row; the navigation bar's back button returns to the list. The settings can be changed while the mod is off (they apply once it is on)
+struct ModSettingsPage: View {
+    let mod: Setting
+    @ObservedObject var m: LauncherModel
+
+    private var on: Bool { (m.values[mod.env] ?? mod.def) == mod.onValue }
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(m.modSettings(of: mod)) { SettingRow(s: $0, m: m) }
+            } footer: {
+                if !on { Text("\(mod.label) is off. These settings apply once you turn it on.") }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .contentMargins(.horizontal, 12, for: .scrollContent)
+        .navigationTitle(mod.label)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+#endif

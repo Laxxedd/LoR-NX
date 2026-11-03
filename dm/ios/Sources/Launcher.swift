@@ -96,6 +96,7 @@ private struct LauncherView: View {
     let play: () -> Void
     @State private var memory = os_proc_available_memory()
     @State private var editingSwipeLayout = false
+    @State private var modPage: [String] = []   // the open mod settings page (a mod's env): the navigation stack's path
 
     // Opens the layout editor of the Swipe touch layout (GestureLayoutEditor.swift). It is the only touch layout
     private var swipeEditorButton: some View {
@@ -125,36 +126,47 @@ private struct LauncherView: View {
                 }
                 .padding(16)
                 .frame(width: geometry.size.width / 3, height: geometry.size.height)
-                List {
-                    ForEach(m.sections, id: \.self) { section in
-                        let rows = m.rows(in: section)
-                        if !rows.isEmpty {
-                            Section(section) {
-                                ForEach(rows) { SettingRow(s: $0, m: m) }
-                                if section == "Controls" { swipeEditorButton }
+                NavigationStack(path: $modPage) {
+                    List {
+                        ForEach(m.sections, id: \.self) { section in
+                            let rows = m.topRows(in: section)
+                            if !rows.isEmpty {
+                                Section(section) {
+                                    ForEach(rows) { s in
+                                        // a mod with settings of its own: a row with a chevron that opens them on their own page
+                                        if m.modSettings(of: s).isEmpty { SettingRow(s: s, m: m) }
+                                        else { ModEntryRow(s: s, m: m) { modPage.append(s.env) } }
+                                    }
+                                    if section == "Controls" { swipeEditorButton }
+                                }
+                            }
+                        }
+                        if m.rows(in: "Controls").isEmpty {   // a game with no controls settings still gets the editor
+                            Section("Controls") { swipeEditorButton }
+                        }
+                        Section {
+                            Button("Reset to tested defaults") { m.reset() }
+                                .disabled(!m.changed)
+                        } footer: {
+                            Text("Brings back all settings this game was tested with.")
+                        }
+                        CloudSavesSection()
+                        Section {
+                            HStack {
+                                Text("Memory available")
+                                Spacer()
+                                Text(ByteCountFormatter.string(fromByteCount: Int64(memory), countStyle: .memory)).monospacedDigit().foregroundStyle(.secondary)
                             }
                         }
                     }
-                    if m.rows(in: "Controls").isEmpty {   // a game with no controls settings still gets the editor
-                        Section("Controls") { swipeEditorButton }
-                    }
-                    Section {
-                        Button("Reset to tested defaults") { m.reset() }
-                            .disabled(!m.changed)
-                    } footer: {
-                        Text("Brings back all settings this game was tested with.")
-                    }
-                    CloudSavesSection()
-                    Section {
-                        HStack {
-                            Text("Memory available")
-                            Spacer()
-                            Text(ByteCountFormatter.string(fromByteCount: Int64(memory), countStyle: .memory)).monospacedDigit().foregroundStyle(.secondary)
-                        }
+                    .listStyle(.insetGrouped)
+                    .contentMargins(.horizontal, 12, for: .scrollContent)
+                    .navigationTitle("Settings")   // the back button of a mod's page reads this; the list itself has no navigation bar
+                    .toolbar(.hidden, for: .navigationBar)
+                    .navigationDestination(for: String.self) { env in
+                        if let mod = m.settings.first(where: { $0.env == env }) { ModSettingsPage(mod: mod, m: m) }
                     }
                 }
-                .listStyle(.insetGrouped)
-                .contentMargins(.horizontal, 12, for: .scrollContent)
                 .frame(width: geometry.size.width * 2 / 3)
             }
         }

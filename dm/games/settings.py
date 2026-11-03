@@ -54,7 +54,7 @@ def rows():
 
 
 def mod_rows(path, taken):
-    """The switches of the mods built into this app (DM_MODS_SETTINGS, written by scripts/apply_mods.py), as toggle rows under the Mods section: 1 on, 0 off, off unless the file says default 1"""
+    """The switches of the mods built into this app (DM_MODS_SETTINGS, written by scripts/apply_mods.py), as rows under the Mods section: a toggle is 1 on / 0 off unless the file gives its own on and off values, off unless the file says otherwise"""
     try: given = json.loads(Path(path).read_text(encoding='utf-8'))['settings']
     except (OSError, ValueError, KeyError) as e: sys.exit(f'DM_MODS_SETTINGS {path}: cannot read the mods settings: {e}')
     out = []
@@ -65,8 +65,10 @@ def mod_rows(path, taken):
         if not r.get('label'): sys.exit(f'DM_MODS_SETTINGS: {env} has no label')
         kind = r.get('kind', 'toggle')
         row = {'env': env, 'kind': kind, 'section': MODS_SECTION, 'label': r['label'], 'note': r.get('note', '')}
-        if kind == 'toggle': row.update({'default': '1' if r.get('default') == '1' else '0', 'on': '1', 'off': '0'})
-        else: row.update({k: r[k] for k in ('default', 'min', 'max', 'step', 'options') if k in r})
+        if kind == 'toggle':
+            on, off = r.get('on', '1'), r.get('off', '0')   # a switch can read the other way (on 0 / off 1: a Disable ... switch); the default is the value the variable takes
+            row.update({'default': r['default'] if r.get('default') in (on, off) else off, 'on': on, 'off': off})
+        else: row.update({k: r[k] for k in ('default', 'min', 'max', 'step', 'options', 'format') if k in r})
         if r.get('needs'): row['needs'] = r['needs']
         out.append(row)
     return out

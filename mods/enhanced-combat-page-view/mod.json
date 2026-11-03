@@ -1,7 +1,7 @@
 {
   "id": "enhanced-combat-page-view",
   "title": "Enhanced Combat Page View",
-  "description": "Port of Cyaminthe's Enhanced Combat Page View (Workshop 2802216129) as a host callback on an observation gate: the combat pages in the hand are zoomed (25% bigger by default). For Library of Ruina 1.0.3.",
+  "description": "Port of Cyaminthe's Enhanced Combat Page View (Workshop 2802216129) as a host callback on an observation gate: the combat pages in the hand are zoomed (x1.25, 25% bigger, by default). For Library of Ruina 1.0.3.",
   "launcher": {
     "env": "DM_MOD_ECPV",
     "label": "Enhanced Combat Page View",
@@ -11,12 +11,13 @@
     {
       "env": "DM_MOD_ECPV_ZOOM",
       "kind": "range",
-      "label": "Page zoom (%)",
-      "note": "How much bigger the combat pages in your hand are. 125 is 25% bigger.",
-      "default": "125",
-      "min": 100,
-      "max": 175,
-      "step": 5
+      "format": "multiplier",
+      "label": "Page zoom",
+      "note": "How much bigger the combat pages in your hand are. x1.25 is 25% bigger.",
+      "default": "1.25",
+      "min": 1.0,
+      "max": 1.75,
+      "step": 0.05
     }
   ],
   "game": "Library of Ruina 1.0.3",

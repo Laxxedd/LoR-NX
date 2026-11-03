@@ -102,6 +102,7 @@ def main():
         print('no mods selected'); return
     os.makedirs(a.out)
     defs, obs, number, launcher, switch, switch_env = [], {}, FIRST_GATE, [], {}, []
+    launcher_groups = []   # (launcher.order, mod id, rows): the Mods section lists the mods by order, then id (mod.json launcher "order", default 0)
     for mid in sorted(set(want)):
         d = os.path.join(ROOT, 'mods', mid)
         with open(os.path.join(d, 'mod.json'), encoding='utf-8') as f: mod = json.load(f)
@@ -122,17 +123,26 @@ def main():
         lc = mod.get('launcher', {})
         env = lc.get('env', f'DM_MOD_{ident(mid)}')
         if not re.fullmatch(r'DM_[A-Z0-9_]+', env): sys.exit(f'[RED] {mid}: launcher env {env!r} must match DM_[A-Z0-9_]+')
-        launcher.append({'env': env, 'kind': 'toggle', 'section': 'Mods', 'label': lc.get('label', mod.get('title', mid)),
-                         'note': lc.get('note', mod.get('description', '')), 'default': '0', 'on': '1', 'off': '0'})
+        rows = [{'env': env, 'kind': 'toggle', 'section': 'Mods', 'label': lc.get('label', mod.get('title', mid)),
+                 'note': lc.get('note', mod.get('description', '')), 'default': '0', 'on': '1', 'off': '0'}]
         for st in mod.get('settings', []):
             if not re.fullmatch(r'DM_[A-Z0-9_]+', st.get('env', '')): sys.exit(f'[RED] {mid}: setting env {st.get("env")!r} must match DM_[A-Z0-9_]+')
             kind = st.get('kind', 'toggle')
             if kind not in ('toggle', 'range', 'choice'): sys.exit(f'[RED] {mid}: setting {st["env"]} has kind {kind!r}')
             row = {'env': st['env'], 'kind': kind, 'section': 'Mods', 'label': st['label'], 'note': st.get('note', ''), 'default': str(st.get('default', '0')), 'needs': f'{env}=1'}
-            if kind == 'toggle': row.update({'on': '1', 'off': '0'})
-            elif kind == 'range': row.update({k: st[k] for k in ('min', 'max', 'step')})
+            if kind == 'toggle':
+                on, off = str(st.get('on', '1')), str(st.get('off', '0'))   # an "inverted" switch (a Disable ... switch) takes on 0 / off 1: the variable keeps its meaning, the switch reads the other way
+                if on == off: sys.exit(f'[RED] {mid}: setting {st["env"]} has the same value for on and off')
+                row.update({'on': on, 'off': off})
+                if row['default'] not in (on, off): sys.exit(f'[RED] {mid}: setting {st["env"]} defaults to {row["default"]!r}, which is neither {on!r} nor {off!r}')
+            elif kind == 'range':
+                row.update({k: st[k] for k in ('min', 'max', 'step')})
+                if st.get('format'):
+                    if st['format'] not in ('multiplier',): sys.exit(f'[RED] {mid}: setting {st["env"]} has format {st["format"]!r}')
+                    row['format'] = st['format']   # multiplier: shown as x1.25 instead of a percentage
             else: row['options'] = st['options']
-            launcher.append(row)
+            rows.append(row)
+        launcher_groups.append((int(lc.get('order', 0)), mid, rows))
         if mod.get('host'): shutil.copyfile(os.path.join(d, mod['host']), os.path.join(host, f'hle_mod_{ident(mid).lower()}.c'))
         n_sw = 0
         if mod.get('exefs'):
@@ -154,6 +164,7 @@ def main():
             shutil.copytree(romfs, os.path.join(a.out, 'romfs'), dirs_exist_ok=True, ignore=shutil.ignore_patterns('.gitkeep'))
         print(f'mod {mid}: {len(nums)} gates, {n_rows} gate rows for builds {", ".join(sorted({b for b in mod.get("obs", {}) if re.fullmatch(r"[0-9a-f]{32}", b)})) or "none yet"}')
         if mod.get('gates') and not n_rows: print(f'[warn] {mid} has no gate rows: it is built in but nothing will call it until mod.json has rows for your main\'s build ID')
+    launcher = [r for _, _, rows in sorted(launcher_groups, key=lambda g: g[:2]) for r in rows]
     with open(os.path.join(host, 'hle_mods_gen.h'), 'w', encoding='utf-8') as f:
         f.write('// written by scripts/apply_mods.py; do not edit\n#pragma once\n' + '\n'.join(defs) + '\n')
     pj = os.path.abspath(os.path.join(a.out, 'patches.json'))

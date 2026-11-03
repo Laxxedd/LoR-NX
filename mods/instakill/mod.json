@@ -4,7 +4,8 @@
   "description": "Every librarian (Player faction) die rolls 999 and its damage fields are set to 999, as host callbacks on observation gates. For Library of Ruina 1.0.3.",
   "launcher": {
     "env": "DM_MOD_INSTAKILL",
-    "label": "instakill",
+    "label": "Instakill",
+    "order": 100,
     "note": "All librarians have their dice roll and damage values set to 999"
   },
   "game": "Library of Ruina 1.0.3",

@@ -13,6 +13,7 @@
 //   enable_pre   MapManager.EnableMap entry (x0 = the map): remembered
 //   enable_ret1, enable_ret2  the last instruction before each of the two returns of MapManager.EnableMap (a ret cannot take a gate; the registers are already restored): the roots were just switched, so clean up the remembered map
 //   quake_post   just after the call of YesodMapManager.ActiveSpark in <EarthQuake>.MoveNext (x20 = the map; ActiveDusts is inlined just before): the 10 second loop switches smoke and gear sparks on again
+// The launcher shows each of these as a "Disable ..." switch: switch on = the variable is 0 (hidden), switch off = 1 (shown). The variables and their values are unchanged, so env.txt files keep working.
 // Off by default: DM_MOD_YESOD=1 turns the callbacks on (the launcher's Mods > Map Optimizations: Yesod switch, or env.txt). The gates are always in the code and pass through while it is off.
 #include "dm.h"
 #include "hle_mods_gen.h"
