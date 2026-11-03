@@ -279,6 +279,7 @@ jobs:
           GAME_DIR="$HOME/game"
           WORK_DIR="$HOME/work"
           mkdir -p "$WORK_DIR"
+          if [ "$ROMFS_MODE" = headless ]; then ROMFS_MODE=separate; fi
           args=("$GAME_DIR" -k "$RUNNER_TEMP/prod.keys" -o "$GAME_DIR/nxnative.ipa" --work-dir "$WORK_DIR" --keep-extracted --romfs "$ROMFS_MODE" --progress lines)
           if [ -n "$APP_NAME" ]; then args+=(--app-name "$APP_NAME"); fi
           # shellcheck disable=SC2086
