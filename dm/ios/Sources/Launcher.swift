@@ -113,7 +113,11 @@ private struct LauncherView: View {
         GeometryReader { geometry in
             HStack(spacing: 0) {
                 VStack(spacing: 16) {
-                    if let icon = appIcon() {
+                    if let thumbnail = launcherThumbnail() {   // the game's own picture (dm/ios/Resources/LauncherThumbnail.png), shown whole
+                        Image(uiImage: thumbnail).resizable().scaledToFit()
+                            .frame(maxWidth: .infinity, maxHeight: 150)
+                            .accessibilityHidden(true)
+                    } else if let icon = appIcon() {
                         Image(uiImage: icon).resizable().frame(width: 96, height: 96)
                             .clipShape(RoundedRectangle(cornerRadius: 22))
                             .accessibilityHidden(true)
@@ -183,6 +187,11 @@ private struct LauncherView: View {
     @ViewBuilder var playButton: some View {
         let button = Button(action: play) { Text("Play").font(.title3.weight(.semibold)).frame(maxWidth: 220) }.controlSize(.large)
         if #available(iOS 26.0, *) { button.buttonStyle(.glassProminent) } else { button.buttonStyle(.borderedProminent) }
+    }
+
+    private func launcherThumbnail() -> UIImage? {
+        guard let path = Bundle.main.path(forResource: "LauncherThumbnail", ofType: "png") else { return nil }
+        return UIImage(contentsOfFile: path)
     }
 
     private func appIcon() -> UIImage? {
