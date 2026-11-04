@@ -5,6 +5,7 @@
 #import <QuartzCore/CAMetalLayer.h>
 #import <Metal/Metal.h>
 #import <AVFAudio/AVFAudio.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #include <errno.h>
 #include "front.h"
 #include "hle.h"
@@ -57,13 +58,14 @@ static CGRect fit_16_9(CGRect b) {   // the largest centered 16:9 rectangle in b
 }
 static void tv_attach(void);
 
-@interface DmRootVC : UIViewController
+@interface DmRootVC : UIViewController <UIDocumentPickerDelegate>
 @property (nonatomic, strong) DmGameView *game;
 @property (nonatomic, strong) UIView *pad;
 @property (nonatomic, strong) UILabel *fps;
 @property (nonatomic) BOOL launched;
 @property (nonatomic, strong) id tv;   // the TV scene accessory's registration (iOS 27)
 - (void)startGame;
+- (void)importImage;
 @end
 static DmRootVC *g_root;
 static void launcher_done(void) { [g_root startGame]; }
@@ -120,14 +122,52 @@ static void launcher_done(void) { [g_root startGame]; }
 }
 - (void)viewDidAppear:(BOOL)a {
     [super viewDidAppear:a];
-    if (!front_ios_boot_ok() && front_ios_boot_message() && !self.presentedViewController) {   // a slim build whose game file image is missing or another version (main.m)
-        UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Game files" message:@(front_ios_boot_message()) preferredStyle:UIAlertControllerStyleAlert];
-        [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    if (!front_ios_boot_ok() && !self.presentedViewController) {   // the game file image is missing or another version (main.m): offer to import one
+        const char *why = front_ios_boot_message();
+        UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Game files" message:why ? @(why) : @"Game files not found. Import the RomFS image (.img), or put the RomFS folder into this App's Documents as \"romfs\" (Files app)." preferredStyle:UIAlertControllerStyleAlert];
+        [a addAction:[UIAlertAction actionWithTitle:@"Import image" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) { (void)x; [self importImage]; }]];
+        [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
         [self presentViewController:a animated:YES completion:nil];
     }
     if (self.launched || !front_ios_boot_ok()) return;
     self.launched = YES; g_root = self;
     if (!dm_show_launcher((__bridge void *)self, launcher_done)) [self startGame];   // the settings screen first (Launcher.swift), when the app has one
+}
+// "Import image" in the Game files alert: pick a RomFS image (.img only) in the Files app and move it to Documents/romfs.img, where main.m looks for it at the next start
+- (void)importImage {
+    UTType *img = [UTType typeWithFilenameExtension:@"img"];
+    UIDocumentPickerViewController *pk = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[img ?: UTTypeData] asCopy:NO];
+    pk.allowsMultipleSelection = NO; pk.delegate = self;
+    [self presentViewController:pk animated:YES completion:nil];
+}
+- (void)importDone:(NSString *)title message:(NSString *)m {
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:title message:m preferredStyle:UIAlertControllerStyleAlert];
+    [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:a animated:YES completion:nil];
+}
+- (void)documentPicker:(UIDocumentPickerViewController *)c didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
+    (void)c; NSURL *src = urls.firstObject; if (!src) return;
+    if ([src.pathExtension caseInsensitiveCompare:@"img"] != NSOrderedSame) { [self importDone:@"Not an image" message:@"Pick a RomFS image: a file ending in .img."]; return; }
+    UIAlertController *busy = [UIAlertController alertControllerWithTitle:@"Importing image" message:@"Moving the file into the app. This can take a while for a large image." preferredStyle:UIAlertControllerStyleAlert];
+    [self presentViewController:busy animated:YES completion:nil];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSFileManager *fm = NSFileManager.defaultManager; NSError *err = nil; BOOL ok = NO;
+        BOOL scoped = [src startAccessingSecurityScopedResource];
+        NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];
+        for (NSString *n in [fm contentsOfDirectoryAtPath:doc error:nil])   // an earlier image of any letter case would shadow or clash with the new one
+            if ([n caseInsensitiveCompare:@"romfs.img"] == NSOrderedSame) [fm removeItemAtPath:[doc stringByAppendingPathComponent:n] error:nil];
+        NSURL *dst = [NSURL fileURLWithPath:[doc stringByAppendingPathComponent:@"romfs.img"]];
+        ok = [fm moveItemAtURL:src toURL:dst error:&err];
+        if (!ok) { err = nil; ok = [fm copyItemAtURL:src toURL:dst error:&err]; }   // a source the app may not remove from (iCloud Drive, another app's folder): copy instead
+        if (scoped) [src stopAccessingSecurityScopedResource];
+        if (!ok) [fm removeItemAtURL:dst error:nil];
+        fprintf(stderr, ok ? "boot: imported RomFS image to %s\n" : "[RED] boot: RomFS image import failed: %s\n", ok ? dst.path.fileSystemRepresentation : err.localizedDescription.UTF8String);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [busy dismissViewControllerAnimated:YES completion:^{
+                [self importDone:ok ? @"Image imported" : @"Import failed" message:ok ? @"The RomFS image is in the app's Documents folder. Close the app and open it again to use it." : err.localizedDescription];
+            }];
+        });
+    });
 }
 - (BOOL)prefersHomeIndicatorAutoHidden { return YES; }
 - (UIRectEdge)preferredScreenEdgesDeferringSystemGestures { return UIRectEdgeAll; }   // Edge gestures need two swipes, to avoid accidental exits
