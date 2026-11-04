@@ -34,17 +34,18 @@ import Foundation
         expect(m.values["DM_METAL_HUD"] == "1" && !m.changed, "Reset leaves the env file's value; nothing left to reset")
         m.apply()
         expect(d.string(forKey: "launcher.DM_PSO_MTL4") == nil && d.string(forKey: "launcher.DM_FPS_TARGET") == nil, "Play after Reset forgets the choices")
-        d.set(30, forKey: "launcher.DM_FPS_TARGET"); d.set(false, forKey: "launcher.DM_RUMBLE")   // a number and a boolean, as defaults write -int / -bool stores them
+        d.set(30, forKey: "launcher.DM_FPS_TARGET"); d.set(false, forKey: "launcher.DM_TOUCH_HAPTICS")   // a number and a boolean, as defaults write -int / -bool stores them
         let typed = LauncherModel(file.settings, defaults: d)
-        expect(typed.values["DM_FPS_TARGET"] == file.settings.first { $0.env == "DM_FPS_TARGET" }!.def && typed.values["DM_RUMBLE"] == "1", "a saved value that is not a string is ignored, as launcher.c ignores it")
-        d.removeObject(forKey: "launcher.DM_FPS_TARGET"); d.removeObject(forKey: "launcher.DM_RUMBLE")
+        expect(typed.values["DM_FPS_TARGET"] == file.settings.first { $0.env == "DM_FPS_TARGET" }!.def && typed.values["DM_TOUCH_HAPTICS"] == "1", "a saved value that is not a string is ignored, as launcher.c ignores it")
+        d.removeObject(forKey: "launcher.DM_FPS_TARGET"); d.removeObject(forKey: "launcher.DM_TOUCH_HAPTICS")
         // Sub-settings: a row with "needs" is drawn only while the setting it names has that value
-        m.values["DM_RUMBLE"] = "1"
-        expect(m.rows(in: "Controls").contains { $0.env == "DM_RUMBLE_GAIN" }, "a sub-setting is drawn while its setting is on")
-        m.values["DM_RUMBLE"] = "0"
-        expect(!m.rows(in: "Controls").contains { $0.env == "DM_RUMBLE_GAIN" }, "a sub-setting is hidden while its setting is off")
-        expect(m.rows(in: "Controls").contains { $0.env == "DM_RUMBLE" }, "the setting it depends on stays drawn")
-        m.values["DM_RUMBLE"] = "1"
+        m.values["DM_PSO_MTL4"] = "1"
+        expect(m.rows(in: "Performance").contains { $0.env == "DM_PSO_PREBUILD" }, "a sub-setting is drawn while its setting is on")
+        m.values["DM_PSO_MTL4"] = "0"
+        expect(!m.rows(in: "Performance").contains { $0.env == "DM_PSO_PREBUILD" }, "a sub-setting is hidden while its setting is off")
+        expect(m.rows(in: "Performance").contains { $0.env == "DM_PSO_MTL4" }, "the setting it depends on stays drawn")
+        m.values["DM_PSO_MTL4"] = "1"
+        expect(["DM_HOLD_PLUS", "DM_DEDICATED_B"].allSatisfy { e in m.rows(in: "Controls").contains { $0.env == e && $0.def == "0" } } && !m.rows(in: "Controls").contains { $0.env.hasPrefix("DM_RUMBLE") }, "Controls has the two touch toggles, off by default, and no rumble rows")
         // DM_LAUNCHER=0 skips the screen, not the saved choices; DM_SAVED_CHOICES=0 ignores them and leaves them stored
         let fps = file.settings.first { $0.env == "DM_FPS_TARGET" }!
         d.set("30", forKey: "launcher.DM_FPS_TARGET"); unsetenv("DM_FPS_TARGET")
@@ -64,7 +65,7 @@ import Foundation
         let mac = try! JSONDecoder().decode(SettingsFile.self, from: Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[2])))
         setenv("DM_ENV_FILE_KEYS", "", 1); unsetenv("DM_FULLSCREEN"); unsetenv("DM_OPMODE")
         let mm = LauncherModel(mac.settings, defaults: d)
-        expect(mm.sections(basic: true) == ["Game", "Controls"] && mm.sections(basic: false) == ["Game", "Controls", "Performance"], "Basic and Advanced keep the list's sections")
+        expect(mm.sections(basic: true) == ["Game"] && mm.sections(basic: false) == ["Game", "Performance"], "Basic and Advanced keep the list's sections")
         expect(mm.rows(in: "Game", basic: true).map(\.env) == ["DM_FPS_TARGET", "DM_RENDER_SCALE", "DM_OPMODE", "DM_LANG", "DM_FULLSCREEN"], "Basic rows in the list's order")
         expect(!file.settings.contains { $0.env == "DM_FULLSCREEN" } && mm.values["DM_FULLSCREEN"] == "0", "Display mode is the Mac's, Window by default")
         mm.values["DM_FULLSCREEN"] = "1"; mm.apply()

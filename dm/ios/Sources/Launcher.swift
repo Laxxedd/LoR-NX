@@ -204,7 +204,7 @@ private struct LauncherView: View {
                 .frame(width: geometry.size.width * 2 / 3)
             }
         }
-        .fullScreenCover(isPresented: $editingSwipeLayout) { GestureLayoutEditorView() }
+        .fullScreenCover(isPresented: $editingSwipeLayout) { GestureLayoutEditorView(dedicatedB: m.values["DM_DEDICATED_B"] == "1") }
         .preferredColorScheme(.dark)
         .task {
             while !Task.isCancelled {

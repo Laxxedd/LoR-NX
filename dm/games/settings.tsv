@@ -23,9 +23,8 @@ DM_LANG	choice	languages	build:DM_LANG	languages>1	Game	Game language		level=bas
 DM_FULLSCREEN	choice	0=Window,1=Fullscreen	0	platform:mac	Game	Display mode		level=basic
 DM_SHOW_FPS	toggle	-	build:DM_SHOW_FPS	platform:ios	Game	Frame-rate counter
 DM_TOUCH_HAPTICS	toggle	-	1	platform:ios	Controls	Touch feedback
-DM_RUMBLE	toggle	-	1	always	Controls	Game rumble		level=basic
-DM_RUMBLE_GAIN	range	0:3:0.1	1.0	always	Controls	Rumble strength		needs=DM_RUMBLE=1
-DM_RUMBLE_MIN	range	0:0.9:0.05	0	always	Controls	Rumble cutoff
+DM_HOLD_PLUS	toggle	-	0	platform:ios	Controls	Hold to confirm + button	The **+** button, used to confirm stageplays, burning books, combat phases & other important actions, will only activate if held.
+DM_DEDICATED_B	toggle	-	0	platform:ios	Controls	Dedicated B button	Adds the B button to the controller scheme rather than using the hold-to-back out gesture.
 DM_PRESENT_SNAP	toggle	-	DM_GAME_PRESENT_SNAP	gfxapi:nvn	Performance	Frame buffering	Up to one frame more display latency.
 DM_PSO_MTL4	toggle	-	DM_GAME_PSO_MTL4|1	gfxapi:nvn	Performance	Metal 4 pipelines	Keeps a pipeline archive; uses more memory.
 DM_PSO_PREBUILD	toggle	-	1	gfxapi:nvn	Performance	Pipeline prebuild	The first start waits a few minutes for it, once.	needs=DM_PSO_MTL4=1

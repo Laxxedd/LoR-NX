@@ -2,19 +2,19 @@
 
 How to build and install a game: [README](../README.md#how-to-play).
 
-- **Settings:** a screen before the game starts sets frame rate, resolution, docked or handheld mode, language, rumble and more. Tap **Play**; your choices are remembered. What each one does: [Settings](settings.md).
+- **Settings:** a screen before the game starts sets frame rate, resolution, docked or handheld mode, language, touch controls and more. Tap **Play**; your choices are remembered. What each one does: [Settings](settings.md).
 - **Saves and logs** are in the Files app, under the game's name: `save/` and `log.txt` (the previous run is `log.prev.txt`). When something goes wrong, send `log.txt`.
 - **Reinstalling:** some sideloading tools give a reinstalled app a new data folder. Copy `save/` and `pso_user.tsv` over from the old one to keep your progress.
 
 ## Touch controls
 
-This fork has one touch layout, the swipe gamepad: swipes are the D-pad, a tap is A, a hold is B, and L, R, ZL, ZR, X, Y, − and + are outlined buttons. Place them in the launcher under Controls > Edit swipe controls layout. The 2D, 3D and Tap layouts and the layout button at the top centre are gone.
+This fork has one touch layout, the swipe gamepad: swipes are the D-pad, a tap is A, a hold is B (or a dedicated B button, if you turn that setting on), and L, R, ZL, ZR, X, Y, − and + are outlined buttons. The right stick button is a scroller: hold it and move that finger up or down to scroll, or swipe with another finger while holding it to move the right stick. The default layout is the one the editor's **Reset** brings back. Place them in the launcher under Controls > Edit swipe controls layout. The 2D, 3D and Tap layouts and the layout button at the top centre are gone.
 
 A connected game controller hides the touch controls and keeps every button.
 
 ## Rumble
 
-Game vibration uses the iPhone's haptic engine or a compatible connected controller. Controllers with separate left/right haptic outputs keep those effects separate. The settings screen's **Game rumble** and **Rumble strength** control it independently of **Touch feedback**. Phone rumble approximates the Switch's effects; physical feel and controller compatibility still need device testing.
+Game vibration uses the iPhone's haptic engine or a compatible connected controller. Controllers with separate left/right haptic outputs keep those effects separate. It is always on and has no setting on the screen; `DM_RUMBLE`, `DM_RUMBLE_GAIN` and `DM_RUMBLE_MIN` in `Documents/env.txt` still change it ([env switches](env_switches.tsv)). Phone rumble approximates the Switch's effects; physical feel and controller compatibility still need device testing.
 
 ## Motion (gyro)
 

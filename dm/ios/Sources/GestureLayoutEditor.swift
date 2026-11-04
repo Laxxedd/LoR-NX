@@ -6,13 +6,20 @@ import SwiftUI
 struct GestureLayoutEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var model = GestureLayoutEditorModel()
+    /// The launcher's current "Dedicated B button" choice: the B control is placed only while it is on.
+    let dedicatedB: Bool
+
     @State private var panelAtTop = true
+
+    init(dedicatedB: Bool) {
+        self.dedicatedB = dedicatedB
+    }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            GestureControllerView(editorModel: model)
+            GestureControllerView(editorModel: model, dedicatedB: dedicatedB)
                 .ignoresSafeArea()
 
             VStack {

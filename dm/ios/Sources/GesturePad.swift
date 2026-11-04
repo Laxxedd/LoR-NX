@@ -4,16 +4,14 @@
 //    - Swipe up / down / left / right -> D-pad press in that direction. By default ONE press per touch; with the swipe lock
 //                                        open, one continuous swipe keeps firing a press every time the finger travels another step.
 //    - Tap                            -> A (haptic)
-//    - Touch and hold                 -> B (held until the finger lifts, haptic on press)
+//    - Touch and hold                 -> B (held until the finger lifts, haptic on press). Off while the dedicated B button is on (DM_DEDICATED_B)
 //
-//  Buttons (minimal outline style):
-//    - L / R           top-left
-//    - ZL / ZR         top-right
-//    - X / Y           on the 2/3 line down the screen
-//    - - / +           centred in the bottom third
-//    - L3 / R3         bottom-left / bottom-right (the stick clicks). R3 is the "special" button of the mods (mods/README.md): vanilla games do not use it, so a mod can claim it
-//    - Right stick     middle-left toggle. While on, swipes move the right stick instead of the D-pad (tap = A and hold = B still work)
-//    - Swipe lock      middle-right toggle. Locked = one D-pad press per swipe, unlocked = several presses per swipe
+//  Buttons (minimal outline style), placed by GestureLayout.defaults (the default layout) or by the player in the editor:
+//    - L / R, ZL / ZR, X / Y, - / +, L3 / R3 (the stick clicks). R3 is the "special" button of the mods (mods/README.md): vanilla games do not use it, so a mod can claim it
+//    - B               only with DM_DEDICATED_B=1, left of X; the touch-and-hold gesture is then off
+//    - +               with DM_HOLD_PLUS=1 it presses only after being held for holdPlusDuration: it fills up while held and a success haptic plays when it fires
+//    - Right stick     a scroller: while a finger holds it, moving that finger up or down tilts the right stick, and swipes made elsewhere with another finger move the stick instead of the D-pad
+//    - Swipe lock      toggle. Locked = one D-pad press per swipe, unlocked = several presses per swipe
 //
 // Button positions, sizes and opacity are edited in GestureLayoutEditor.swift (Launcher > Controls > Edit swipe layout) and kept in UserDefaults.
 // Presses reach the host through dm_gesture_button / dm_gesture_stick (DmGamepad.m), which publish them next to the other touch controls.
@@ -37,7 +35,7 @@ enum PadButton: UInt64 {
 // MARK: - Layout model
 
 enum GestureControlID: String, CaseIterable, Codable {
-    case l, r, zl, zr, x, y, minus, plus, stick, lock, l3, r3
+    case l, r, zl, zr, x, y, b, minus, plus, stick, lock, l3, r3
 
     var title: String {
         switch self {
@@ -47,6 +45,7 @@ enum GestureControlID: String, CaseIterable, Codable {
         case .zr: return "ZR"
         case .x: return "X"
         case .y: return "Y"
+        case .b: return "B"
         case .minus: return "−"
         case .plus: return "+"
         case .stick: return "Right Stick"
@@ -69,6 +68,33 @@ struct GestureLayout: Codable, Equatable {
     }
 
     var items: [String: Item] = [:]
+
+    /// The default layout. The grid cell is 1/24 of the short side, so a row is n/24 of the height and a column n/51.91 of the width on the 2.16:1 phone it was made on.
+    /// Every control sits on the editor grid there; a control the player has not moved or resized takes its entry from here.
+    static let defaults: [GestureControlID: Item] = {
+        let columns: CGFloat = 51.91
+        func item(_ column: CGFloat, _ row: CGFloat, _ scale: CGFloat) -> Item {
+            Item(x: (column / columns * 10000).rounded() / 10000, y: (row / 24 * 10000).rounded() / 10000, scale: scale, opacity: 0.75)
+        }
+        return [
+            .zl: item(5, 2, 1.25), .zr: item(9, 2, 1.25),
+            .l: item(5, 22, 1.25), .r: item(9, 22, 1.25),
+            .r3: item(1, 4, 0.75), .l3: item(1, 6.5, 0.75),
+            .lock: item(39, 2, 1.0), .stick: item(42, 2, 1.0),
+            .minus: item(49, 2, 1.0), .plus: item(49, 4, 1.0),
+            .b: item(30, 22, 1.25), .x: item(34, 22, 1.25), .y: item(38, 22, 1.25)
+        ]
+    }()
+
+    /// What the control looks like now: the player's own entry, else the default one. A layout saved before opacity existed (nil) was fully opaque.
+    func effective(_ id: GestureControlID) -> Item {
+        if let saved = items[id.rawValue] {
+            var item = saved
+            if item.opacity == nil { item.opacity = 1 }
+            return item
+        }
+        return Self.defaults[id] ?? Item(x: 0.5, y: 0.5, scale: 1, opacity: 1)
+    }
 }
 
 /// Each game is its own app, so there is one layout per app.
@@ -127,9 +153,10 @@ final class GestureLayoutEditorModel: ObservableObject {
 
 struct GestureControllerView: UIViewRepresentable {
     let editorModel: GestureLayoutEditorModel
+    let dedicatedB: Bool
 
     func makeUIView(context: Context) -> GestureControllerUIView {
-        let view = GestureControllerUIView(editing: true)
+        let view = GestureControllerUIView(editing: true, dedicatedB: dedicatedB)
         let model = editorModel
 
         model.view = view
@@ -153,7 +180,7 @@ struct GestureControllerView: UIViewRepresentable {
 /// Full-screen grid shown behind the controls while editing. It is drawn by the editing view itself so it always lines up with the snapping.
 private final class GestureGridView: UIView {
     /// Every this many cells a heavier line marks a block, so the fine grid stays readable.
-    private let majorEvery = 4
+    private let majorEvery = 8
     var cell: CGFloat = 16 { didSet { if oldValue != cell { setNeedsDisplay() } } }
 
     override init(frame: CGRect) {
@@ -224,8 +251,12 @@ final class GestureControllerUIView: UIView {
     private let minimumPress: TimeInterval = 0.07
     /// Buttons are always at least this big to hit, however small they are drawn.
     private let minimumHitSize: CGFloat = 54
-    /// The editor grid has this many cells along the short side of the screen. Twice as many as the first version, so each old section is split in four.
-    private let gridDivisions: CGFloat = 24
+    /// The editor grid has this many cells along the short side of the screen. Twice as many as the second version, so each of its sections is split in four.
+    private let gridDivisions: CGFloat = 48
+    /// The + button, with DM_HOLD_PLUS on, fires after being held this long.
+    private let holdPlusDuration: TimeInterval = 0.75
+    /// Finger travel (points) before the right-stick scroller starts to tilt, and the travel that tilts it fully after that.
+    private let scrollDeadzone: CGFloat = 8
 
     private static let multiSwipeDefaultsKey = "GestureMultiSwipeEnabled"
 
@@ -235,11 +266,19 @@ final class GestureControllerUIView: UIView {
         return atoi(value) != 0
     }()
 
+    private let holdPlusOn: Bool = {
+        guard let value = getenv("DM_HOLD_PLUS") else { return false }
+        return atoi(value) != 0
+    }()
+
+    /// The B button is a control of its own and the touch-and-hold gesture is off. The editor passes the launcher's current choice, as the environment is not set yet there.
+    private let dedicatedB: Bool
+
     // MARK: Controls
 
     private enum Kind: Equatable {
         case button(PadButton)
-        case stickToggle
+        case stickScroll
         case swipeLockToggle
     }
 
@@ -251,6 +290,8 @@ final class GestureControllerUIView: UIView {
         private let icon = UIImageView()
         private let symbol: String?
         private let activeSymbol: String?
+        /// Fills the control from its left edge while a hold-to-confirm press builds up (the + button, DM_HOLD_PLUS).
+        private let fillLayer = CALayer()
 
         var isActive = false { didSet { refresh() } }
 
@@ -264,6 +305,12 @@ final class GestureControllerUIView: UIView {
 
             isUserInteractionEnabled = false
             layer.borderWidth = 1
+            layer.masksToBounds = true
+
+            fillLayer.backgroundColor = UIColor.white.withAlphaComponent(0.4).cgColor
+            fillLayer.anchorPoint = CGPoint(x: 0, y: 0.5)
+            fillLayer.transform = Self.emptyFill
+            layer.insertSublayer(fillLayer, at: 0)
 
             label.text = title
             label.textColor = .white
@@ -285,9 +332,51 @@ final class GestureControllerUIView: UIView {
         override func layoutSubviews() {
             super.layoutSubviews()
             layer.cornerRadius = isCircle ? min(bounds.width, bounds.height) / 2 : bounds.height / 2
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            fillLayer.bounds = CGRect(origin: .zero, size: bounds.size)
+            fillLayer.position = CGPoint(x: 0, y: bounds.midY)
+            CATransaction.commit()
             label.frame = bounds
             label.font = .systemFont(ofSize: max(11, min(bounds.height * 0.4, 24)), weight: .medium)
             icon.frame = bounds.insetBy(dx: bounds.width * 0.28, dy: bounds.height * 0.28)
+        }
+
+        private static let emptyFill = CATransform3DMakeScale(0.0001, 1, 1)
+
+        /// Fills the control from empty to full in `duration`, evenly.
+        func startFill(duration: TimeInterval) {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            fillLayer.removeAllAnimations()
+            fillLayer.transform = CATransform3DIdentity
+            CATransaction.commit()
+
+            let animation = CABasicAnimation(keyPath: "transform.scale.x")
+            animation.fromValue = 0.0001
+            animation.toValue = 1
+            animation.duration = duration
+            animation.timingFunction = CAMediaTimingFunction(name: .linear)
+            fillLayer.add(animation, forKey: "fill")
+        }
+
+        /// Empties the fill from wherever it has got to, quickly.
+        func drainFill() {
+            let current = (fillLayer.presentation()?.value(forKeyPath: "transform.scale.x") as? NSNumber)?.doubleValue ?? 0
+
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            fillLayer.removeAllAnimations()
+            fillLayer.transform = Self.emptyFill
+            CATransaction.commit()
+
+            guard current > 0.01 else { return }
+            let animation = CABasicAnimation(keyPath: "transform.scale.x")
+            animation.fromValue = current
+            animation.toValue = 0.0001
+            animation.duration = 0.15 * current
+            animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            fillLayer.add(animation, forKey: "drain")
         }
 
         private func refresh() {
@@ -311,20 +400,24 @@ final class GestureControllerUIView: UIView {
 
     private let lockControl = ControlView(id: .lock, kind: .swipeLockToggle, title: "", circle: true, symbol: "lock", activeSymbol: "lock.open")
 
-    private lazy var controls: [ControlView] = [
-        ControlView(id: .l, kind: .button(.leftShoulder), title: "L", circle: false),
-        ControlView(id: .r, kind: .button(.rightShoulder), title: "R", circle: false),
-        ControlView(id: .zl, kind: .button(.leftTrigger), title: "ZL", circle: false),
-        ControlView(id: .zr, kind: .button(.rightTrigger), title: "ZR", circle: false),
-        ControlView(id: .x, kind: .button(.x), title: "X", circle: true),
-        ControlView(id: .y, kind: .button(.y), title: "Y", circle: true),
-        ControlView(id: .minus, kind: .button(.minus), title: "−", circle: false),
-        ControlView(id: .plus, kind: .button(.plus), title: "+", circle: false),
-        ControlView(id: .l3, kind: .button(.leftStick), title: "L3", circle: true),
-        ControlView(id: .r3, kind: .button(.rightStick), title: "R3", circle: true),
-        ControlView(id: .stick, kind: .stickToggle, title: "RS", circle: true, symbol: "r.joystick"),
-        lockControl
-    ]
+    private lazy var controls: [ControlView] = {
+        var list = [
+            ControlView(id: .l, kind: .button(.leftShoulder), title: "L", circle: false),
+            ControlView(id: .r, kind: .button(.rightShoulder), title: "R", circle: false),
+            ControlView(id: .zl, kind: .button(.leftTrigger), title: "ZL", circle: false),
+            ControlView(id: .zr, kind: .button(.rightTrigger), title: "ZR", circle: false),
+            ControlView(id: .x, kind: .button(.x), title: "X", circle: true),
+            ControlView(id: .y, kind: .button(.y), title: "Y", circle: true),
+            ControlView(id: .minus, kind: .button(.minus), title: "−", circle: false),
+            ControlView(id: .plus, kind: .button(.plus), title: "+", circle: false),
+            ControlView(id: .l3, kind: .button(.leftStick), title: "L3", circle: true),
+            ControlView(id: .r3, kind: .button(.rightStick), title: "R3", circle: true),
+            ControlView(id: .stick, kind: .stickScroll, title: "RS", circle: true, symbol: "r.joystick"),
+            lockControl
+        ]
+        if self.dedicatedB { list.append(ControlView(id: .b, kind: .button(.b), title: "B", circle: true)) }
+        return list
+    }()
 
     // MARK: Haptics
 
@@ -333,6 +426,7 @@ final class GestureControllerUIView: UIView {
     private let tapHaptic = UIImpactFeedbackGenerator(style: .medium)   // A
     private let holdHaptic = UIImpactFeedbackGenerator(style: .heavy)   // B
     private let gridHaptic = UISelectionFeedbackGenerator()
+    private let confirmHaptic = UINotificationFeedbackGenerator()   // the + button fired (hold to confirm)
 
     // MARK: Gameplay touch tracking
 
@@ -365,7 +459,12 @@ final class GestureControllerUIView: UIView {
     private var gestureTouches: [ObjectIdentifier: GestureTouch] = [:]
     private var buttonTouches: [ObjectIdentifier: ControlView] = [:]
 
-    private var rightStickEnabled = false
+    /// Where each finger holding the right stick button went down: moving it up or down tilts the stick from there.
+    private var stickScrollStarts: [ObjectIdentifier: CGPoint] = [:]
+    /// A finger is holding the right stick button: swipes made elsewhere move the stick instead of the D-pad.
+    private var stickHeld: Bool { buttonTouches.values.contains { $0.kind == .stickScroll } }
+    /// The + button is being held and has not fired yet.
+    private var plusHoldWork: DispatchWorkItem?
     /// Swipe lock open: one swipe can fire several D-pad presses.
     private var multiSwipeEnabled = UserDefaults.standard.bool(forKey: GestureControllerUIView.multiSwipeDefaultsKey)
 
@@ -389,9 +488,16 @@ final class GestureControllerUIView: UIView {
 
     // MARK: Init
 
-    init(editing: Bool) {
+    init(editing: Bool, dedicatedB: Bool? = nil) {
         self.layout = GestureLayoutStore.load()
         self.isEditing = editing
+        if let dedicatedB {
+            self.dedicatedB = dedicatedB
+        } else if let value = getenv("DM_DEDICATED_B") {
+            self.dedicatedB = atoi(value) != 0
+        } else {
+            self.dedicatedB = false
+        }
         super.init(frame: .zero)
 
         backgroundColor = .clear
@@ -425,39 +531,7 @@ final class GestureControllerUIView: UIView {
 
     /// Editor grid cell, in points. Square cells sized from the short side of the screen.
     private var gridCell: CGFloat {
-        max(min(bounds.width, bounds.height) / gridDivisions, 10)
-    }
-
-    private func defaultCenters(width w: CGFloat, height h: CGFloat) -> [GestureControlID: CGPoint] {
-        let pill = pillSize
-        let circle = circleSize
-        let gap = 10 * scale
-
-        let leftEdge = safeAreaInsets.left + 14
-        let rightEdge = w - safeAreaInsets.right - 14
-        let topY = safeAreaInsets.top + 10 + pill.height / 2
-
-        return [
-            // L & R: top-left
-            .l: CGPoint(x: leftEdge + pill.width / 2, y: topY),
-            .r: CGPoint(x: leftEdge + pill.width * 1.5 + gap, y: topY),
-            // ZL & ZR: top-right
-            .zr: CGPoint(x: rightEdge - pill.width / 2, y: topY),
-            .zl: CGPoint(x: rightEdge - pill.width * 1.5 - gap, y: topY),
-            // X & Y: along the 2/3 line down the screen
-            .x: CGPoint(x: w * 0.28, y: h * 2 / 3),
-            .y: CGPoint(x: w * 0.72, y: h * 2 / 3),
-            // - & +: centred in the bottom third
-            .minus: CGPoint(x: w / 2 - (pill.width / 2 + gap * 2), y: h * 5 / 6),
-            .plus: CGPoint(x: w / 2 + (pill.width / 2 + gap * 2), y: h * 5 / 6),
-            // Right stick toggle: middle-left
-            .stick: CGPoint(x: leftEdge + circle.width / 2, y: h / 2),
-            // Swipe lock toggle: middle-right
-            .lock: CGPoint(x: rightEdge - circle.width / 2, y: h / 2),
-            // L3 & R3 (the stick clicks): bottom corners, level with - / +
-            .l3: CGPoint(x: leftEdge + circle.width / 2, y: h * 5 / 6),
-            .r3: CGPoint(x: rightEdge - circle.width / 2, y: h * 5 / 6)
-        ]
+        max(min(bounds.width, bounds.height) / gridDivisions, 6)
     }
 
     override func safeAreaInsetsDidChange() {
@@ -477,21 +551,14 @@ final class GestureControllerUIView: UIView {
             gridView.cell = gridCell
         }
 
-        let defaults = defaultCenters(width: w, height: h)
-
         for control in controls {
-            let item = layout.items[control.id.rawValue]
+            let item = layout.effective(control.id)
             let base = control.isCircle ? circleSize : pillSize
-            let factor = item?.scale ?? 1
-            let size = CGSize(width: base.width * factor, height: base.height * factor)
+            let size = CGSize(width: base.width * item.scale, height: base.height * item.scale)
 
-            control.alpha = min(max(item?.opacity ?? 1, 0.05), 1)
+            control.alpha = min(max(item.opacity ?? 1, 0.05), 1)
 
-            var center = item.map { CGPoint(x: $0.x * w, y: $0.y * h) } ?? defaults[control.id] ?? .zero
-
-            if item != nil {
-                center = clamped(center, size: size)
-            }
+            let center = clamped(CGPoint(x: item.x * w, y: item.y * h), size: size)
 
             // Do not fight an in-progress drag
             if isEditing, dragTouches.values.contains(where: { $0.control === control }) {
@@ -547,15 +614,20 @@ final class GestureControllerUIView: UIView {
 
             if let control = controlAt(point) {
                 buttonTouches[id] = control
+                if control.kind == .stickScroll { stickScrollStarts[id] = point }
                 controlDown(control)
                 continue
             }
 
             let gesture = GestureTouch(start: point)
-            let work = DispatchWorkItem { [weak self] in self?.holdFired(id) }
-            gesture.holdWork = work
             gestureTouches[id] = gesture
-            DispatchQueue.main.asyncAfter(deadline: .now() + holdDelay, execute: work)
+
+            // With the dedicated B button the touch-and-hold gesture is off: a finger that stays down just waits to become a tap or a swipe.
+            if !dedicatedB {
+                let work = DispatchWorkItem { [weak self] in self?.holdFired(id) }
+                gesture.holdWork = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + holdDelay, execute: work)
+            }
         }
     }
 
@@ -566,8 +638,14 @@ final class GestureControllerUIView: UIView {
         }
 
         for touch in touches {
-            guard let gesture = gestureTouches[ObjectIdentifier(touch)] else { continue }
             let point = touch.location(in: self)
+
+            if let start = stickScrollStarts[ObjectIdentifier(touch)] {
+                scrollStick(from: start, to: point)
+                continue
+            }
+
+            guard let gesture = gestureTouches[ObjectIdentifier(touch)] else { continue }
 
             switch gesture.phase {
             case .undecided:
@@ -581,7 +659,7 @@ final class GestureControllerUIView: UIView {
                 gesture.holdWork?.cancel()
                 gesture.holdWork = nil
 
-                if rightStickEnabled {
+                if stickHeld {
                     gesture.phase = .stick
                     handleStick(gesture, to: point)
                 } else {
@@ -644,6 +722,7 @@ final class GestureControllerUIView: UIView {
             let id = ObjectIdentifier(touch)
 
             if let control = buttonTouches.removeValue(forKey: id) {
+                stickScrollStarts.removeValue(forKey: id)
                 controlUp(control)
                 continue
             }
@@ -729,6 +808,14 @@ final class GestureControllerUIView: UIView {
         setStick(x: x, y: y)
     }
 
+    /// The right stick button as a scroller: moving the finger holding it up or down tilts the stick that way, further from where it went down meaning more.
+    private func scrollStick(from start: CGPoint, to point: CGPoint) {
+        let dy = point.y - start.y
+        let travel = max(abs(dy) - scrollDeadzone, 0)
+        let tilt = min(travel / max(stickRadius - scrollDeadzone, 1), 1)
+        setStick(x: 0, y: dy < 0 ? -tilt : tilt)
+    }
+
     /// x and y are in screen coordinates (down = positive); the host takes up as positive, so y is flipped here.
     private func setStick(x: CGFloat, y: CGFloat) {
         dm_gesture_stick(Int32((x * 32767).rounded()), Int32((-y * 32767).rounded()))
@@ -741,20 +828,14 @@ final class GestureControllerUIView: UIView {
 
         switch control.kind {
         case .button(let button):
-            control.isActive = true
-            pressButton(button)
-        case .stickToggle:
-            rightStickEnabled.toggle()
-            control.isActive = rightStickEnabled
-
-            if !rightStickEnabled {
-                setStick(x: 0, y: 0)
-                // Fingers already dragging the stick are done.
-                for gesture in gestureTouches.values where gesture.phase == .stick {
-                    gesture.phase = .spent
-                    gesture.swipeFired = true
-                }
+            if button == .plus, holdPlusOn {
+                beginPlusHold(control)
+            } else {
+                control.isActive = true
+                pressButton(button)
             }
+        case .stickScroll:
+            control.isActive = true
         case .swipeLockToggle:
             multiSwipeEnabled.toggle()
             control.isActive = multiSwipeEnabled
@@ -763,9 +844,50 @@ final class GestureControllerUIView: UIView {
     }
 
     private func controlUp(_ control: ControlView) {
-        guard case .button(let button) = control.kind else { return }
-        control.isActive = false
-        releaseButton(button)
+        switch control.kind {
+        case .button(let button):
+            control.isActive = false
+            if button == .plus, holdPlusOn {
+                endPlusHold(control)
+            } else {
+                releaseButton(button)
+            }
+        case .stickScroll:
+            control.isActive = false
+            setStick(x: 0, y: 0)
+            // Fingers already moving the stick with a swipe are done.
+            for gesture in gestureTouches.values where gesture.phase == .stick {
+                gesture.phase = .spent
+                gesture.swipeFired = true
+            }
+        case .swipeLockToggle:
+            break
+        }
+    }
+
+    // MARK: - Hold to confirm (+)
+
+    /// The + button fills up while it is held. After `holdPlusDuration` a success haptic plays and + is pressed once; letting go sooner presses nothing.
+    private func beginPlusHold(_ control: ControlView) {
+        plusHoldWork?.cancel()
+        control.startFill(duration: holdPlusDuration)
+        if hapticsOn { confirmHaptic.prepare() }
+
+        let work = DispatchWorkItem { [weak self, weak control] in
+            guard let self else { return }
+            self.plusHoldWork = nil
+            control?.isActive = true
+            if self.hapticsOn { self.confirmHaptic.notificationOccurred(.success) }
+            self.pulse(.plus)
+        }
+        plusHoldWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + holdPlusDuration, execute: work)
+    }
+
+    private func endPlusHold(_ control: ControlView) {
+        plusHoldWork?.cancel()
+        plusHoldWork = nil
+        control.drainFill()
     }
 
     /// Presses a held button. If the same button is still waiting out its minimum press time from a previous tap, release it first so the game sees a fresh press.
@@ -850,8 +972,11 @@ final class GestureControllerUIView: UIView {
         pulseRunning.removeAll()
         pendingRelease.values.forEach { $0.cancel() }
         pendingRelease.removeAll()
+        stickScrollStarts.removeAll()
+        plusHoldWork?.cancel()
+        plusHoldWork = nil
+        controls.first(where: { $0.id == .plus })?.drainFill()
         controls.forEach { $0.isActive = false }
-        controls.first(where: { $0.id == .stick })?.isActive = rightStickEnabled
         controls.first(where: { $0.id == .lock })?.isActive = multiSwipeEnabled
 
         PadButton.all.forEach { setButton($0, pressed: false) }
@@ -906,7 +1031,7 @@ final class GestureControllerUIView: UIView {
         guard let control = controls.first(where: { $0.id == id }),
               bounds.width > 0, bounds.height > 0 else { return }
 
-        var item = layout.items[id.rawValue] ?? GestureLayout.Item(x: 0, y: 0, scale: 1, opacity: nil)
+        var item = layout.effective(id)
         item.x = control.center.x / bounds.width
         item.y = control.center.y / bounds.height
         mutate(&item)
@@ -920,8 +1045,8 @@ final class GestureControllerUIView: UIView {
         updateSelectionRing()
 
         if let id {
-            let item = layout.items[id.rawValue]
-            onSelectionChange?(id.title, item?.scale ?? 1, item?.opacity ?? 1)
+            let item = layout.effective(id)
+            onSelectionChange?(id.title, item.scale, item.opacity ?? 1)
         } else {
             onSelectionChange?(nil, nil, nil)
         }
@@ -962,8 +1087,8 @@ final class GestureControllerUIView: UIView {
         layout = GestureLayoutStore.load()
 
         if let id = selectedID {
-            let item = layout.items[id.rawValue]
-            onSelectionChange?(id.title, item?.scale ?? 1, item?.opacity ?? 1)
+            let item = layout.effective(id)
+            onSelectionChange?(id.title, item.scale, item.opacity ?? 1)
         }
 
         setNeedsLayout()
