@@ -1,23 +1,21 @@
 {
   "id": "instakill",
   "title": "Instakill (Library of Ruina)",
-  "description": "Every librarian (Player faction) die rolls 999 and its damage fields are set to 999, and every non-librarian a librarian die hits is killed right after the game's own damage call, whatever its resistances, immunities, 0 damage or immortality. Host callbacks on observation gates. For Library of Ruina 1.0.3.",
+  "description": "All librarians have a fixed dice roll and damage of 999, all resistances and immunity effects are ignored.",
   "launcher": {
     "env": "DM_MOD_INSTAKILL",
     "label": "Instakill",
     "order": 100,
-    "note": "Librarian dice roll 999, and whatever a librarian die hits dies at once, even enemies that resist, are immune, take 0 damage or cannot die"
+    "note": "All librarians have a fixed dice roll and damage of 999, all resistances and immunity effects are ignored."
   },
   "game": "Library of Ruina 1.0.3",
   "gates": [
     "final_value_post",
-    "give_damage_post",
-    "take_damage_pre",
-    "after_give_damage_pre"
+    "give_damage_post"
   ],
   "host": "host.c",
   "obs": {
-    "_comment": "main build ID (first 16 bytes of the module ID, 32 hex digits) -> rows {gate, offset, word, reason}; word = the 4 bytes at offset read as a little-endian u32, or \"auto\": the rewriter takes the game's own word (dm/tools/patch_nso.py prints it, so check it against the function). Offsets are the RVAs of dump.cs / script.json (main = RVA + 0x234000 in the DmIOS file).",
+    "_comment": "main build ID (first 16 bytes of the module ID, 32 hex digits) -> rows {gate, offset, word, reason}; word = the 4 bytes at offset read as a little-endian u32. Offsets are the RVAs of dump.cs / script.json (main = RVA + 0x234000 in the DmIOS file).",
     "aeea627ddbd1214764dfef5f965e94a2": [
       {
         "gate": "final_value_post",
@@ -29,19 +27,7 @@
         "gate": "give_damage_post",
         "offset": "0x2450b08",
         "word": "f9401268",
-        "reason": "BattleDiceBehavior.GiveDamage, right after stp w25,w8,[x19,#84] stores _diceResultDamage / _diceDamageAll: x19 = the BattleDiceBehavior"
-      },
-      {
-        "gate": "take_damage_pre",
-        "offset": "0x1ef6e60",
-        "word": "auto",
-        "reason": "BattleUnitModel.OnTakeDamageByAttack entry (the game calls it after TakeDamage has applied, or refused, the hit): x0 = the unit that was hit, x1 = the attacking BattleDiceBehavior"
-      },
-      {
-        "gate": "after_give_damage_pre",
-        "offset": "0x1ef7460",
-        "word": "auto",
-        "reason": "BattleUnitModel.AfterGiveDamage entry (after the hit has been applied): x0 = the attacker, x1 = the unit that was hit"
+        "reason": "BattleDiceBehavior.GiveDamage, after TakeDamage and TakeBreakDamage have run and w25 (the damage actually taken) is stored by stp w25,w8,[x19,#84]: x19 = the BattleDiceBehavior, x27 = &card, x28 = &target (the closure's target field)"
       }
     ]
   }

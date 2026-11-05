@@ -117,9 +117,8 @@ def main():
             if not re.fullmatch(r'[0-9a-f]{32}', bid): sys.exit(f'[RED] {mid}: build ID {bid!r} is not 32 lowercase hex digits (the first 16 bytes of the module ID)')
             for r in rows:
                 if r['gate'] not in nums: sys.exit(f'[RED] {mid}: row names the gate {r["gate"]!r}, which mod.json does not declare')
-                word = r.get('word', 'auto')   # 'auto' (or no word): the rewriter reads the game's own word at the offset (dm/tools/patch_nso.py), for a gate on a function entry taken from dump.cs / script.json when no copy of main is at hand
-                if word != 'auto' and not re.fullmatch(r'[0-9a-f]{8}', word): sys.exit(f'[RED] {mid}: word {word!r} is not 8 hex digits (or "auto")')
-                obs.setdefault(bid, []).append([int(r['offset'], 0), nums[r['gate']] | int(r.get('param', 0)) << 8, word, f'mod {mid}: {r.get("reason", r["gate"])}'])
+                if not re.fullmatch(r'[0-9a-f]{8}', r['word']): sys.exit(f'[RED] {mid}: word {r["word"]!r} is not 8 hex digits')
+                obs.setdefault(bid, []).append([int(r['offset'], 0), nums[r['gate']] | int(r.get('param', 0)) << 8, r['word'], f'mod {mid}: {r.get("reason", r["gate"])}'])
                 n_rows += 1
         lc = mod.get('launcher', {})
         env = lc.get('env', f'DM_MOD_{ident(mid)}')
