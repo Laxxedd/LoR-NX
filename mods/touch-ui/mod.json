@@ -9,6 +9,10 @@
     "note": "Disables console mode."
   },
   "game": "Library of Ruina 1.0.3",
+  "gates": [
+    "touch_count"
+  ],
+  "host": "host.c",
   "exefs": "exefs",
   "expect": {
     "aeea627ddbd1214764dfef5f965e94a2": {
@@ -17,5 +21,15 @@
       "0x1bca514": "2a0103f4",
       "0x1bca51c": "12000035"
     }
+  },
+  "obs": {
+    "aeea627ddbd1214764dfef5f965e94a2": [
+      {
+        "gate": "touch_count",
+        "offset": "0x16f05e8",
+        "word": "7100001f",
+        "reason": "LOR_InputModule.ProcessTouchEvents tail (RVA 0x16f0450): cmp w0, #0 after the input.touchCount call, w0 = touchCount; runs every frame the module processes"
+      }
+    ]
   }
 }

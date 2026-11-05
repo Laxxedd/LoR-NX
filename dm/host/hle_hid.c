@@ -796,17 +796,40 @@ HLE_FORCE("_ZN2nn3hid28ShowControllerFirmwareUpdateERKNS0_27ControllerFirmwareUp
 int touch_fill_n(void *out, int max, uint64_t now_ns);
 // Touchscreen Mode (DM_TOUCHSCREEN=1, the launcher's setting; the game needs a mod such as touch-ui to use it): the touch points reach the game in console mode too
 static int touch_reaches_game(void) { static _Atomic int v = -1; int m = v; if (m < 0) { const char *e = getenv("DM_TOUCHSCREEN"); m = (e && atoi(e)) || dm_opmode() == 0; v = m; } return m; }
-static void touch_read(void *s, int n) {
+static const char *touch_where(void *ra, char *b, size_t n) {
+    uintptr_t a = (uintptr_t)ra;
+    for (int i = 0; i < g_nmod; i++) {
+        uintptr_t lo = (uintptr_t)g_mod[i].base;
+        if (a >= lo && a < lo + g_mod[i].size) { snprintf(b, n, "%s+%#lx", g_mod[i].name, (unsigned long)(a - lo)); return b; }
+    }
+    snprintf(b, n, "%p", ra);
+    return b;
+}
+static void touch_trace(int n, void *ra, int reach, int cnt) {
+    static void *seen[8]; static int nseen, last = -1, nlog;
+    int fresh = 1;
+    for (int i = 0; i < nseen; i++) if (seen[i] == ra) fresh = 0;
+    if (fresh && nseen < 8) seen[nseen++] = ra; else fresh = 0;
+    if (!fresh && cnt == last) return;
+    last = cnt;
+    if (nlog >= 300) return;
+    char w[48];
+    LOG("[touch_read] TouchScreenState<%d> caller %s reaches_game=%d points=%d", n, touch_where(ra, w, sizeof w), reach, cnt);
+    if (++nlog == 300) LOG("[touch_read] log capped at 300 lines");
+}
+static void touch_read(void *s, int n, void *ra) {
     keys_sync();   // DM_KEYS frame steps due in this frame (their touches), before the read
-    if (touch_reaches_game()) { touch_fill_n(s, n, now_ns()); return; }
-    int64_t *p = s; p[0] = atomic_fetch_add(&g_sampling, 1) + 1; ((int32_t *)s)[2] = 0; ((int32_t *)s)[3] = 0;
+    int reach = touch_reaches_game(), cnt = 0;
+    if (reach) cnt = touch_fill_n(s, n, now_ns());
+    else { int64_t *p = s; p[0] = atomic_fetch_add(&g_sampling, 1) + 1; ((int32_t *)s)[2] = 0; ((int32_t *)s)[3] = 0; }
+    touch_trace(n, ra, reach, cnt);
 }
 HLE_FORCE("_ZN2nn3hid21InitializeTouchScreenEv", "connect to the hid touch screen; the host takes touch points from the front end", void, h_hid_InitTouch, void) {}
 // SDK 18 overload with two ints (Super Mario Galaxy); the SDK's own one opens the hid service and aborts in sm::Initialize
 HLE_FORCE("_ZN2nn3hid21InitializeTouchScreenEii", "connect to the hid touch screen (SDK 18 two-argument version); the host takes touch points from the front end", void, h_hid_InitTouch2, int a, int b) { (void)a; (void)b; }
 #define TOUCH(N) \
-    HLE_FORCE("_ZN2nn3hid19GetTouchScreenStateILm" #N "EEEvPNS0_16TouchScreenStateIXT_EEE", "touch screen current state (touch points only in handheld mode)", void, h_hid_Touch1_##N, void *s) { touch_read(s, N); } \
-    HLE_FORCE("_ZN2nn3hid20GetTouchScreenStatesILm" #N "EEEiPNS0_16TouchScreenStateIXT_EEEi", "touch screen states: 1 entry (touch points only in handheld mode)", int, h_hid_TouchN_##N, void *s, int n) { if (n <= 0) return 0; touch_read(s, N); return 1; }
+    HLE_FORCE("_ZN2nn3hid19GetTouchScreenStateILm" #N "EEEvPNS0_16TouchScreenStateIXT_EEE", "touch screen current state (touch points only in handheld mode)", void, h_hid_Touch1_##N, void *s) { touch_read(s, N, __builtin_return_address(0)); } \
+    HLE_FORCE("_ZN2nn3hid20GetTouchScreenStatesILm" #N "EEEiPNS0_16TouchScreenStateIXT_EEEi", "touch screen states: 1 entry (touch points only in handheld mode)", int, h_hid_TouchN_##N, void *s, int n) { if (n <= 0) return 0; touch_read(s, N, __builtin_return_address(0)); return 1; }
 TOUCH(1) TOUCH(2) TOUCH(3) TOUCH(4) TOUCH(5) TOUCH(6) TOUCH(7) TOUCH(8) TOUCH(9) TOUCH(10) TOUCH(11) TOUCH(12) TOUCH(13) TOUCH(14) TOUCH(15) TOUCH(16)
 // Gestures: recognized from the same touch points (hle_touch.c gesture_fill), so only in handheld mode too
 int gesture_fill(void *out, int n, uint64_t now_ns);
