@@ -5,7 +5,7 @@
 #define MAX_LINES 120
 
 typedef struct { int hits, lines; uint64_t key[4]; } gate_t;
-static gate_t g_count, g_getter, g_poll, g_end;
+static gate_t g_count, g_getter, g_end, g_icall;
 
 static int mod_enabled(void) {
     static int on = -1;
@@ -44,27 +44,34 @@ static void on_getter(uint64_t *r, int p) {
     if (want_log(&g_getter, key)) LOG("[mod touch-ui] getter: hit %d obj %#llx flag[+24]=%d count[+2272]=%d", g_getter.hits - 1, (unsigned long long)r[0], flag, cnt);
 }
 
-static void on_poll(uint64_t *r, int p) {
-    (void)p;
-    if (!mod_enabled() || !r[0]) return;
-    const uint8_t *obj = (const uint8_t *)(uintptr_t)r[0];
-    int n = *(const int32_t *)(obj + 2240);
-    uint64_t key[4] = { r[0], (uint64_t)(uint32_t)n, 0, 0 };
-    if (want_log(&g_poll, key)) LOG("[mod touch-ui] poll entry: hit %d this %#llx count[+2240]=%d lastSample[+2248]=%lld", g_poll.hits - 1, (unsigned long long)r[0], n, (long long)*(const int64_t *)(obj + 2248));
-}
-
 static void on_poll_end(uint64_t *r, int p) {
     (void)p;
     if (!mod_enabled() || !r[19]) return;
     const uint8_t *obj = (const uint8_t *)(uintptr_t)r[19];
     int n = *(const int32_t *)(obj + 2240);
-    uint64_t key[4] = { r[19], (uint64_t)(uint32_t)n, (uint64_t)*(const int64_t *)(obj + 48), 0 };
+    uint64_t key[4] = { (uint64_t)(uint32_t)n, (uint64_t)*(const int64_t *)(obj + 48), 0, 0 };
     if (want_log(&g_end, key)) LOG("[mod touch-ui] poll exit: hit %d this %#llx count[+2240]=%d tracked[+48]=%lld lastSample[+2248]=%lld", g_end.hits - 1, (unsigned long long)r[19], n, (long long)*(const int64_t *)(obj + 48), (long long)*(const int64_t *)(obj + 2248));
+}
+
+static uint8_t *main_base(void) {
+    static uint8_t *base;
+    if (!base)
+        for (int i = 0; i < g_nmod; i++)
+            if (!strcmp(g_mod[i].name, "main") && !g_mod[i].nro) { base = g_mod[i].base; break; }
+    return base;
+}
+
+static void on_icall(uint64_t *r, int p) {
+    (void)p;
+    if (!mod_enabled()) return;
+    uint64_t target = r[0];
+    uint64_t key[4] = { target, 0, 0, 0 };
+    if (want_log(&g_icall, key)) LOG("[mod touch-ui] Input.get_touchCount icall target %#llx = main+%#llx (hit %d)", (unsigned long long)target, (unsigned long long)(target - (uint64_t)(uintptr_t)main_base()), g_icall.hits - 1);
 }
 
 __attribute__((constructor)) static void mod_touch_ui_attach(void) {
     gate_obs_set(MODGATE_TOUCH_UI_TOUCH_COUNT, on_touch_count);
     gate_obs_set(MODGATE_TOUCH_UI_GETTER, on_getter);
-    gate_obs_set(MODGATE_TOUCH_UI_POLL, on_poll);
+    gate_obs_set(MODGATE_TOUCH_UI_ICALL, on_icall);
     gate_obs_set(MODGATE_TOUCH_UI_POLL_END, on_poll_end);
 }
