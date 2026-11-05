@@ -1218,7 +1218,11 @@ for a in sorted(kinds):
 obs = list(PATCHES['OBS'].get(BUILD_ID, []))
 for off, oid, ow, why in obs:
     w = struct.unpack_from('<I', IMG, off)[0]
-    assert f'{w:08x}' == ow, f'observation gate original instruction mismatch {off:#x}: {w:08x}'
+    assert ow == 'auto' or f'{w:08x}' == ow, f'observation gate original instruction mismatch {off:#x}: {w:08x}'
+    if ow == 'auto':   # a mod row without a copied word (mods/README.md): take the game's own, and show it so the site can be checked against dump.cs
+        print(f'{NAME}: observation gate at {off:#x} takes the game\'s word {w:08x} ({dis(w, off).mnemonic} {dis(w, off).op_str}): {why}')
+        ow = f'{w:08x}'
+        obs[obs.index((off, oid, 'auto', why))] = (off, oid, ow, why)
     # Any instruction site_obs can relocate: the gate frame saves x0–x28 and the flags and restores them (dm/host/entry.S), so the code around it sees its registers as they were
     # unless the callback writes one
     assert off < TEXT_END and off not in kinds and not any(lo <= off < hi for wseg in windows for lo, hi in [(wseg[0].address, wseg[-1].address + 4)]), f'observation gate conflicts with a rewrite site {off:#x}'
