@@ -5,7 +5,7 @@
 #define MAX_LINES 120
 
 typedef struct { int hits, lines; uint64_t key[4]; } gate_t;
-static gate_t g_count, g_getter, g_end, g_icall;
+static gate_t g_count, g_getter, g_end, g_icall, g_vcall;
 
 static int mod_enabled(void) {
     static int on = -1;
@@ -69,9 +69,22 @@ static void on_icall(uint64_t *r, int p) {
     if (want_log(&g_icall, key)) LOG("[mod touch-ui] Input.get_touchCount icall target %#llx = main+%#llx (hit %d)", (unsigned long long)target, (unsigned long long)(target - (uint64_t)(uintptr_t)main_base()), g_icall.hits - 1);
 }
 
+static void on_vcall(uint64_t *r, int p) {
+    (void)p;
+    if (!mod_enabled() || !r[0] || !r[8]) return;
+    uint64_t base = (uint64_t)(uintptr_t)main_base();
+    const uint64_t *vt = (const uint64_t *)(uintptr_t)r[8];
+    uint64_t key[4] = { r[0], r[8], vt[3], vt[4] };
+    if (want_log(&g_vcall, key))
+        LOG("[mod touch-ui] touchCount manager %#llx vtable main+%#llx slots: [0]=%#llx [1]=%#llx [2]=%#llx [3 -> called]=main+%#llx [4]=main+%#llx [5]=main+%#llx (hit %d)", (unsigned long long)r[0],
+            (unsigned long long)(r[8] - base), (unsigned long long)vt[0] - base, (unsigned long long)vt[1] - base, (unsigned long long)vt[2] - base, (unsigned long long)(vt[3] - base), (unsigned long long)(vt[4] - base),
+            (unsigned long long)(vt[5] - base), g_vcall.hits - 1);
+}
+
 __attribute__((constructor)) static void mod_touch_ui_attach(void) {
     gate_obs_set(MODGATE_TOUCH_UI_TOUCH_COUNT, on_touch_count);
     gate_obs_set(MODGATE_TOUCH_UI_GETTER, on_getter);
     gate_obs_set(MODGATE_TOUCH_UI_ICALL, on_icall);
+    gate_obs_set(MODGATE_TOUCH_UI_VCALL, on_vcall);
     gate_obs_set(MODGATE_TOUCH_UI_POLL_END, on_poll_end);
 }

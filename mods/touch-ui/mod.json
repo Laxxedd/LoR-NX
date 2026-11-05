@@ -13,7 +13,8 @@
     "touch_count",
     "getter",
     "poll_end",
-    "icall"
+    "icall",
+    "vcall"
   ],
   "host": "host.c",
   "exefs": "exefs",
@@ -50,6 +51,12 @@
         "offset": "0x3530e08",
         "word": "f9400bf3",
         "reason": "UnityEngine.Input.get_touchCount (0x3530df0), before the tail call br x0: x0 = the cached native icall function"
+      },
+      {
+        "gate": "vcall",
+        "offset": "0x847884",
+        "word": "f9400d01",
+        "reason": "touchCount bridge (0x847870, the native behind Input.get_touchCount): x0 = the manager singleton, x8 = its vtable, before ldr x1,[x8,#24] that picks the method it tail-calls"
       }
     ]
   }
