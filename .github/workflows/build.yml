@@ -6,6 +6,7 @@ on:
       app_name:
         description: "CFBundleDisplayName"
         required: false
+        default: "Library of Ruina"
         type: string
       extra_args:
         description: "Additional parameters"
@@ -27,7 +28,7 @@ on:
       encrypt:
         description: "Encrypt archive"
         required: true
-        default: true
+        default: false
         type: boolean
 
 permissions:
