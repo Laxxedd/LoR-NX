@@ -12,7 +12,8 @@
   "gates": [
     "touch_count",
     "getter",
-    "poll"
+    "poll",
+    "poll_end"
   ],
   "host": "host.c",
   "exefs": "exefs",
@@ -43,6 +44,12 @@
         "offset": "0x84307c",
         "word": "f9400008",
         "reason": "Unity's native touch poll (0x84304c, called from the GetTouchScreenStates<16> read at 0x8430b4): ldr x8,[x0] with x0 = this, before it is copied to x19"
+      },
+      {
+        "gate": "poll_end",
+        "offset": "0x843728",
+        "word": "6d4223e9",
+        "reason": "epilogue of Unity's native touch poll (0x84304c), reached by every exit: x19 = this, after the touches were copied and [x19+2240] set"
       }
     ]
   }

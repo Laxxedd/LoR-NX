@@ -1,10 +1,11 @@
 #include "dm.h"
 #include "hle_mods_gen.h"
 
-#define HEARTBEAT 300
-#define MAX_LINES 400
+#define HEARTBEAT 600
+#define MAX_LINES 120
 
-static int g_lines;
+typedef struct { int hits, lines; uint64_t key[4]; } gate_t;
+static gate_t g_count, g_getter, g_poll, g_end;
 
 static int mod_enabled(void) {
     static int on = -1;
@@ -16,64 +17,54 @@ static int mod_enabled(void) {
     return on;
 }
 
-static int should_log(int hit, int changed) {
-    if (g_lines >= MAX_LINES) return 0;
-    if (!(hit == 0 || changed || hit % HEARTBEAT == 0)) return 0;
-    if (++g_lines == MAX_LINES) LOG("[mod touch-ui] log capped at %d lines", MAX_LINES);
+static int want_log(gate_t *g, const uint64_t key[4]) {
+    int hit = g->hits++;
+    int changed = hit == 0 || memcmp(g->key, key, sizeof g->key) != 0;
+    memcpy(g->key, key, sizeof g->key);
+    if (g->lines >= MAX_LINES) return 0;
+    if (!(changed || hit % HEARTBEAT == 0)) return 0;
+    if (++g->lines == MAX_LINES) LOG("[mod touch-ui] a gate's log capped at %d lines", MAX_LINES);
     return 1;
 }
-
-static int g_hits_count, g_last_count = -1;
 
 static void on_touch_count(uint64_t *r, int p) {
     (void)p;
     if (!mod_enabled()) return;
     int count = (int)(uint32_t)r[0];
-    int hit = g_hits_count++;
-    int changed = count != g_last_count;
-    g_last_count = count;
-    if (should_log(hit, changed))
-        LOG("[mod touch-ui] touch_count gate: hit %d, LOR_InputModule.ProcessTouchEvents touchCount=%d%s", hit, count, changed ? " (changed)" : "");
+    uint64_t key[4] = { (uint64_t)count, 0, 0, 0 };
+    if (want_log(&g_count, key)) LOG("[mod touch-ui] touch_count: hit %d touchCount=%d", g_count.hits - 1, count);
 }
-
-static int g_hits_get, g_last_flag = -1, g_last_cnt = -1;
-static uint64_t g_last_obj;
 
 static void on_getter(uint64_t *r, int p) {
     (void)p;
-    if (!mod_enabled()) return;
-    uint8_t *obj = (uint8_t *)(uintptr_t)r[0];
-    if (!obj) return;
-    int flag = (int)(uint32_t)r[8] & 0xff;
-    int cnt = *(int32_t *)(obj + 2272);
-    int hit = g_hits_get++;
-    int changed = flag != g_last_flag || cnt != g_last_cnt || r[0] != g_last_obj;
-    g_last_flag = flag; g_last_cnt = cnt; g_last_obj = r[0];
-    if (should_log(hit, changed))
-        LOG("[mod touch-ui] getter gate: hit %d, obj %#llx flag[+24]=%d count[+2272]=%d%s", hit, (unsigned long long)r[0], flag, cnt, changed ? " (changed)" : "");
+    if (!mod_enabled() || !r[0]) return;
+    const uint8_t *obj = (const uint8_t *)(uintptr_t)r[0];
+    int flag = (int)(r[8] & 0xff), cnt = *(const int32_t *)(obj + 2272);
+    uint64_t key[4] = { r[0], (uint64_t)flag, (uint64_t)(uint32_t)cnt, 0 };
+    if (want_log(&g_getter, key)) LOG("[mod touch-ui] getter: hit %d obj %#llx flag[+24]=%d count[+2272]=%d", g_getter.hits - 1, (unsigned long long)r[0], flag, cnt);
 }
-
-static int g_hits_poll;
-static int64_t g_last_samp = -1; static int32_t g_last_n = -1, g_last_c = -1;
-static uint64_t g_last_this;
 
 static void on_poll(uint64_t *r, int p) {
     (void)p;
-    if (!mod_enabled()) return;
-    uint8_t *obj = (uint8_t *)(uintptr_t)r[0];
-    if (!obj) return;
-    int64_t samp = *(int64_t *)(obj + 2248);
-    int32_t n = *(int32_t *)(obj + 2240), c = *(int32_t *)(obj + 2272);
-    int hit = g_hits_poll++;
-    int changed = samp != g_last_samp || n != g_last_n || c != g_last_c || r[0] != g_last_this;
-    g_last_samp = samp; g_last_n = n; g_last_c = c; g_last_this = r[0];
-    if (should_log(hit, changed))
-        LOG("[mod touch-ui] poll gate: hit %d, this %#llx lastSample[+2248]=%lld count[+2240]=%d count[+2272]=%d cap[+24]=%llu%s", hit, (unsigned long long)r[0], (long long)samp, n, c,
-            (unsigned long long)*(uint64_t *)(obj + 24), changed ? " (changed)" : "");
+    if (!mod_enabled() || !r[0]) return;
+    const uint8_t *obj = (const uint8_t *)(uintptr_t)r[0];
+    int n = *(const int32_t *)(obj + 2240);
+    uint64_t key[4] = { r[0], (uint64_t)(uint32_t)n, 0, 0 };
+    if (want_log(&g_poll, key)) LOG("[mod touch-ui] poll entry: hit %d this %#llx count[+2240]=%d lastSample[+2248]=%lld", g_poll.hits - 1, (unsigned long long)r[0], n, (long long)*(const int64_t *)(obj + 2248));
+}
+
+static void on_poll_end(uint64_t *r, int p) {
+    (void)p;
+    if (!mod_enabled() || !r[19]) return;
+    const uint8_t *obj = (const uint8_t *)(uintptr_t)r[19];
+    int n = *(const int32_t *)(obj + 2240);
+    uint64_t key[4] = { r[19], (uint64_t)(uint32_t)n, (uint64_t)*(const int64_t *)(obj + 48), 0 };
+    if (want_log(&g_end, key)) LOG("[mod touch-ui] poll exit: hit %d this %#llx count[+2240]=%d tracked[+48]=%lld lastSample[+2248]=%lld", g_end.hits - 1, (unsigned long long)r[19], n, (long long)*(const int64_t *)(obj + 48), (long long)*(const int64_t *)(obj + 2248));
 }
 
 __attribute__((constructor)) static void mod_touch_ui_attach(void) {
     gate_obs_set(MODGATE_TOUCH_UI_TOUCH_COUNT, on_touch_count);
     gate_obs_set(MODGATE_TOUCH_UI_GETTER, on_getter);
     gate_obs_set(MODGATE_TOUCH_UI_POLL, on_poll);
+    gate_obs_set(MODGATE_TOUCH_UI_POLL_END, on_poll_end);
 }
