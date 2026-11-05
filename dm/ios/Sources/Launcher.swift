@@ -190,13 +190,13 @@ private struct LauncherView: View {
                                 if !rows.isEmpty {
                                     Section(section) {
                                         ForEach(rows) { s in SettingRow(s: s, m: m) }
-                                        if section == "Controls" { swipeEditorButton }
+                                        if section == "Controls" && m.values["DM_TOUCHSCREEN"] != "1" { swipeEditorButton }   // Touchscreen Mode hides the swipe gamepad, so its editor too
                                     }
                                 }
                             }
                         }
                         if m.rows(in: "Controls").isEmpty {   // a game with no controls settings still gets the editor
-                            Section("Controls") { swipeEditorButton }
+                            Section("Controls") { if m.values["DM_TOUCHSCREEN"] != "1" { swipeEditorButton } }
                         }
                         Section {
                             Button("Reset to tested defaults") { m.reset() }

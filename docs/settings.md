@@ -4,7 +4,7 @@ The screen before the game starts shows the settings the game supports. A settin
 
 - [Tested defaults](#tested-defaults)
 - [Game](#game): [Frame rate](#frame-rate), [Render scale](#render-scale), [Console mode](#console-mode), [Upscaling](#upscaling), [Game language](#game-language), [Frame-rate counter](#frame-rate-counter)
-- [Controls](#controls): [Touch feedback](#touch-feedback), [Hold to confirm + button](#hold-to-confirm--button), [Dedicated B button](#dedicated-b-button)
+- [Controls](#controls): [Touchscreen Mode](#touchscreen-mode), [Touch feedback](#touch-feedback), [Hold to confirm + button](#hold-to-confirm--button), [Dedicated B button](#dedicated-b-button)
 - [Performance](#performance): [Frame buffering](#frame-buffering), [Metal 4 pipelines](#metal-4-pipelines), [Pipeline prebuild](#pipeline-prebuild), [Encode thread](#encode-thread), [Hold frames when late](#hold-frames-when-late), [Performance HUD](#performance-hud), [Reset to tested defaults](#reset-to-tested-defaults)
 - [Memory](#memory): [Extend Memory Usage](#extend-memory-usage), [Reallocate Minimum](#reallocate-minimum)
 - [The Mac settings window](#the-mac-settings-window): [Display mode](#display-mode)
@@ -61,6 +61,10 @@ The game's own languages. The app was packed with one of them; pick another here
 Shows the frames per second at the top left.
 
 ## Controls
+
+### Touchscreen Mode
+
+Enables touchscreen. Needs the touch-ui mod (Mods) to work. With it on, the swipe gamepad is hidden and every touch goes to the game as a touch-screen press, in Docked mode as well as Handheld. The game's controller interface is turned off by the mod, so switch both on together. **Touch feedback**, **Hold to confirm + button** and **Dedicated B button** belong to the swipe gamepad and are hidden while it is on. Off by default.
 
 ### Touch feedback
 
@@ -233,6 +237,7 @@ A line like `DM_PRESENT_SNAP=0` in `Documents/env.txt` (in the Files app, under 
 | Display mode (Mac) | `DM_FULLSCREEN` | `1` fullscreen, `0` a window |
 | Cloud saves folder (Mac) | `DM_SAVE_SYNC` | a folder; `icloud`: iCloud Drive › nxnative Saves; `0`: off |
 | Frame-rate counter | `DM_SHOW_FPS` | `1`, `0` |
+| Touchscreen Mode | `DM_TOUCHSCREEN` | `1`, `0` |
 | Touch feedback | `DM_TOUCH_HAPTICS` | `1`, `0` |
 | Hold to confirm + button | `DM_HOLD_PLUS` | `1`, `0` |
 | Dedicated B button | `DM_DEDICATED_B` | `1`, `0` |

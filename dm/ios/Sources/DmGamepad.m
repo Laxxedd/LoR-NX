@@ -180,6 +180,7 @@ static CATextLayer *label(CALayer *parent, NSString *s) {
     t.string = s; t.alignmentMode = kCAAlignmentCenter; t.foregroundColor = k_text.CGColor; t.contentsScale = UIScreen.mainScreen.scale;
     [parent addSublayer:t]; return t;
 }
+static BOOL touchscreen_mode(void) { const char *e = getenv("DM_TOUCHSCREEN"); return e && atoi(e); }   // the launcher's Touchscreen Mode
 static BOOL fullOnly(int b) { return b == B_LS || b == B_RS || b >= B_LEFT; }   // keys shown only in the 3D layout
 
 - (instancetype)initWithFrame:(CGRect)f {
@@ -530,7 +531,8 @@ static BOOL pads_slotted(GCController *gone) {
     GCController *c = note.object, *gone = [note.name isEqual:GCControllerDidDisconnectNotification] ? c : nil;
     if (c && (!c.extendedGamepad || g_merge)) LOG("controller %s: %s%s", gone ? "disconnected" : "connected", pad_name(c), c.extendedGamepad ? "" : " (no extended gamepad profile: not used)");
     BOOL any = g_merge ? pads_merged(gone) : pads_slotted(gone);
-    dispatch_async(dispatch_get_main_queue(), ^{ self->_padOff = any; self->_controls.hidden = any; self->_gestureView.hidden = any; self->_gestureView.userInteractionEnabled = !any; [self reset]; });   // the touch gamepad hides while any controller is in use
+    BOOL off = any || touchscreen_mode();   // Touchscreen Mode (DM_TOUCHSCREEN=1): the touch gamepad stays hidden and every touch goes to the game, controller or not
+    dispatch_async(dispatch_get_main_queue(), ^{ self->_padOff = off; self->_controls.hidden = off; self->_gestureView.hidden = off; self->_gestureView.userInteractionEnabled = !off; [self reset]; });   // the touch gamepad hides while any controller is in use
 }
 @end
 

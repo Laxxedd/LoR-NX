@@ -1,0 +1,21 @@
+@nsobid-AEEA627DDBD1214764DFEF5F965E94A200000000000000000000000000000000
+
+@flag offset_shift 0x100
+
+// Touch UI for Library of Ruina 1.0.3 (build aeea627d...).
+// UI.UIControlManager.isControllerInput is the flag the game's console UI runs on: button prompts, the selection highlight and
+// pad-driven selection all follow it. Only two places write it (found by scanning main for stores to the static field):
+// UIControlManager.SetIsControllerInput (every button handler, the title screen, StoryManager and UICustomSelectable.OnSelect call it with true)
+// and one direct store in UIControlManager.Update (a stick or d-pad axis moves while the flag is false).
+// The game's own pointer handlers (UICustomSelectable.OnPointerEnter/Exit/Down/Up) already call SetIsControllerInput(false).
+
+@enabled
+// SetIsControllerInput: "mov w20, w1" -> "mov w20, wzr" (the value passed on to SetPanelsGuideState)
+1BCA514 F4031F2A
+// SetIsControllerInput: "and w21, w1, #1" -> "mov w21, wzr" (the value stored into isControllerInput)
+1BCA51C F5031F2A
+// UIControlManager.Update: "strb w9, [x8, #8]" -> nop (the direct store of true when a stick or the d-pad moves)
+1BC955C 1F2003D5
+// UIControlManager.Update: "bl SelectSelectableForcely" -> nop (the controller selection that goes with it)
+1BC9564 1F2003D5
+@stop

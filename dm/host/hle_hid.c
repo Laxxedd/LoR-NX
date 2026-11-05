@@ -794,9 +794,11 @@ HLE_FORCE("_ZN2nn3hid28ShowControllerFirmwareUpdateERKNS0_27ControllerFirmwareUp
 // the Mac's mouse, the iPhone touches no gamepad control takes, DM_KEYS taps) in handheld mode, as on the Switch, whose screen is out of reach when docked: a game may read touches
 // without checking the mode, so in console mode the state stays empty (only the header is written). Super Mario Galaxy's pointer is the touch screen in handheld mode
 int touch_fill_n(void *out, int max, uint64_t now_ns);
+// Touchscreen Mode (DM_TOUCHSCREEN=1, the launcher's setting; the game needs a mod such as touch-ui to use it): the touch points reach the game in console mode too
+static int touch_reaches_game(void) { static _Atomic int v = -1; int m = v; if (m < 0) { const char *e = getenv("DM_TOUCHSCREEN"); m = (e && atoi(e)) || dm_opmode() == 0; v = m; } return m; }
 static void touch_read(void *s, int n) {
     keys_sync();   // DM_KEYS frame steps due in this frame (their touches), before the read
-    if (dm_opmode() == 0) { touch_fill_n(s, n, now_ns()); return; }
+    if (touch_reaches_game()) { touch_fill_n(s, n, now_ns()); return; }
     int64_t *p = s; p[0] = atomic_fetch_add(&g_sampling, 1) + 1; ((int32_t *)s)[2] = 0; ((int32_t *)s)[3] = 0;
 }
 HLE_FORCE("_ZN2nn3hid21InitializeTouchScreenEv", "connect to the hid touch screen; the host takes touch points from the front end", void, h_hid_InitTouch, void) {}
@@ -811,7 +813,7 @@ int gesture_fill(void *out, int n, uint64_t now_ns);
 HLE_FORCE("_ZN2nn3hid17InitializeGestureEv", "connect to the hid gesture recognizer; the host recognizes gestures from the touch points", void, h_hid_InitGesture, void) {}
 HLE_FORCE("_ZN2nn3hid16GetGestureStatesEPNS0_12GestureStateEi", "gesture states, newest first (handheld mode: recognized from the touch points; console mode: none)", int, h_hid_Gestures, void *out, int n) {
     keys_sync();
-    return dm_opmode() == 0 ? gesture_fill(out, n, now_ns()) : 0;
+    return touch_reaches_game() ? gesture_fill(out, n, now_ns()) : 0;
 }
 
 // Six-axis details: the current state, at rest unless shaking, fusion off

@@ -1,0 +1,21 @@
+{
+  "id": "touch-ui",
+  "title": "Touch UI",
+  "description": "Disables controller mode",
+  "launcher": {
+    "env": "DM_MOD_TOUCHUI",
+    "category": "Quality of Life",
+    "label": "Touch UI",
+    "note": "Disables console mode."
+  },
+  "game": "Library of Ruina 1.0.3",
+  "exefs": "exefs",
+  "expect": {
+    "aeea627ddbd1214764dfef5f965e94a2": {
+      "0x1bc955c": "39002109",
+      "0x1bc9564": "940000cb",
+      "0x1bca514": "2a0103f4",
+      "0x1bca51c": "12000035"
+    }
+  }
+}
