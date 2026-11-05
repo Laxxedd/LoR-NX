@@ -4,6 +4,7 @@
   "description": "All librarians have a fixed dice roll and damage of 999, all resistances and immunity effects are ignored.",
   "launcher": {
     "env": "DM_MOD_INSTAKILL",
+    "category": "Cheats",
     "label": "Instakill",
     "order": 100,
     "note": "All librarians have a fixed dice roll and damage of 999, all resistances and immunity effects are ignored."

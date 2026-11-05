@@ -60,13 +60,15 @@ struct SettingRow: View {
 }
 
 #if os(iOS)   // the iPhone launcher only: the Mac window lists a mod's settings under it
-// A mod with settings of its own, in the Mods section: its switch, and a chevron that opens its settings page (ModSettingsPage). Tapping the switch only turns the mod on or off;
-// tapping anywhere else on the row (the chevron included) opens the page. A tap gesture, not a Button: the mod's note holds a link to the original mod, which must still open
+// A mod with settings of its own, on the mods page: its switch, and a chevron that opens its settings page (ModSettingsPage). Tapping the switch only turns the mod on or off;
+// tapping anywhere else on the row (the chevron included) opens the page. A tap gesture, not a Button: the mod's note holds a link to the original mod, which must still open.
+// The chevron is drawn in the row's trailing inset, outside the layout, so the switch stays where the switches of the rows without settings are
 struct ModEntryRow: View {
     let s: Setting
     @ObservedObject var m: LauncherModel
     let open: () -> Void
 
+    private static let chevronWidth: CGFloat = 8, chevronGap: CGFloat = 6
     private var locked: Bool { m.fixed.contains(s.env) }
     private var note: String {
         guard locked else { return s.note }
@@ -85,12 +87,45 @@ struct ModEntryRow: View {
             Toggle(s.label, isOn: Binding(get: { (m.values[s.env] ?? s.def) == s.onValue }, set: { m.values[s.env] = $0 ? s.onValue : s.offValue }))
                 .labelsHidden()
                 .disabled(locked)
+        }
+        .overlay(alignment: .trailing) {
             Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                .frame(width: Self.chevronWidth, height: 44)
                 .contentShape(Rectangle())
                 .onTapGesture(perform: open)
+                .offset(x: Self.chevronWidth + Self.chevronGap)
         }
         .accessibilityElement(children: .contain)
         .accessibilityAction(named: "Open settings", open)
+    }
+}
+
+// The mods page, pushed from the Mods section's Browse mods button: every mod in its group (LauncherModel.modCategories), a group with no mods says so. A mod with settings of its own opens them
+// through open (the launcher's navigation path), as it did from the list
+struct ModsBrowserPage: View {
+    @ObservedObject var m: LauncherModel
+    let open: (String) -> Void
+
+    var body: some View {
+        List {
+            ForEach(LauncherModel.modCategories, id: \.self) { category in
+                let mods = m.mods(in: category)
+                Section(category) {
+                    if mods.isEmpty {
+                        Text("No mods yet").foregroundStyle(.secondary)
+                    } else {
+                        ForEach(mods) { s in
+                            if m.modSettings(of: s).isEmpty { SettingRow(s: s, m: m) }
+                            else { ModEntryRow(s: s, m: m) { open(s.env) } }
+                        }
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .contentMargins(.horizontal, 12, for: .scrollContent)
+        .navigationTitle("Mods")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

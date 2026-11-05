@@ -4,6 +4,7 @@
   "description": "Port of the Switch plugin from Library-of-Ruina-CustomDice-NX-Mod: per-floor / per-story speed-dice sprites and colours, the infinity die. Needs the mod's PNGs in the romfs overlay.",
   "launcher": {
     "env": "DM_MOD_SPEEDDICE",
+    "category": "Miscellaneous",
     "label": "Custom Speed Dice",
     "note": "Faction-based custom speed dices. Original mod by [PattyHoswell’s Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=2746914901)"
   },

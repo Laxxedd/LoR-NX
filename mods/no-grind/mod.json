@@ -4,6 +4,7 @@
   "description": "The Switch exefs patch No Grind of Library-of-Ruina-NX-Mods, for Library of Ruina 1.0.3 (build ID aeea627d...).",
   "launcher": {
     "env": "DM_MOD_NOGRIND",
+    "category": "Quality of Life",
     "label": "No Grind",
     "note": "Modifies the game to drop virtually infinite books & combat pages. Original mod by [uGuardian’s Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=2673646927)"
   },

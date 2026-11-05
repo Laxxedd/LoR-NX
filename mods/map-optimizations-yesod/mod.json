@@ -4,6 +4,7 @@
   "description": "Port of uGuardian's Map Optimizations: Yesod (Workshop 2798869790) as host callbacks on observation gates: the gear sparks, background smoke, screen sparks, building sprites, background layers and gears of Yesod's floor can each be switched off. For Library of Ruina 1.0.3.",
   "launcher": {
     "env": "DM_MOD_YESOD",
+    "category": "Performance",
     "label": "Map Optimizations: Yesod",
     "note": "Several optimization improvements to Yesod’s Floor. Original mod by [uGuardian’s Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=2798869790)"
   },

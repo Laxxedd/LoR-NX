@@ -99,7 +99,8 @@ private struct LauncherView: View {
     private let donorEmbedded = dm_ram_donor_embedded()
     private static let memorySection = "Memory"
     @State private var editingSwipeLayout = false
-    @State private var modPage: [String] = []   // the open mod settings page (a mod's env): the navigation stack's path
+    @State private var modPage: [String] = []   // the pages pushed on the list: the mods page (modsPage) and a mod's settings page (its env): the navigation stack's path
+    private static let modsPage = "mods"   // not a DM_ name, so never a mod's env
 
     // Opens the layout editor of the Swipe touch layout (GestureLayoutEditor.swift). It is the only touch layout
     private var swipeEditorButton: some View {
@@ -108,6 +109,20 @@ private struct LauncherView: View {
                 Label("Edit swipe controls layout", systemImage: "formfitting.gamecontroller")
                 Spacer()
                 Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    // The Mods section is one button: the mods themselves, grouped by category, are on the page it opens (ModsBrowserPage)
+    private var modsSection: some View {
+        Section(LauncherModel.modsSection) {
+            Button { modPage.append(Self.modsPage) } label: {
+                HStack {
+                    Text("Browse mods")
+                    Spacer()
+                    if m.modsOn > 0 { Text("\(m.modsOn) on").foregroundStyle(.secondary) }
+                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                }
             }
         }
     }
@@ -168,15 +183,13 @@ private struct LauncherView: View {
                         ForEach(sectionOrder, id: \.self) { section in
                             if section == Self.memorySection {
                                 memorySection
+                            } else if section == LauncherModel.modsSection {
+                                if !m.topRows(in: section).isEmpty { modsSection }
                             } else {
                                 let rows = m.topRows(in: section)
                                 if !rows.isEmpty {
                                     Section(section) {
-                                        ForEach(rows) { s in
-                                            // a mod with settings of its own: a row with a chevron that opens them on their own page
-                                            if m.modSettings(of: s).isEmpty { SettingRow(s: s, m: m) }
-                                            else { ModEntryRow(s: s, m: m) { modPage.append(s.env) } }
-                                        }
+                                        ForEach(rows) { s in SettingRow(s: s, m: m) }
                                         if section == "Controls" { swipeEditorButton }
                                     }
                                 }
@@ -198,7 +211,8 @@ private struct LauncherView: View {
                     .navigationTitle("Settings")   // the back button of a mod's page reads this; the list itself has no navigation bar
                     .toolbar(.hidden, for: .navigationBar)
                     .navigationDestination(for: String.self) { env in
-                        if let mod = m.settings.first(where: { $0.env == env }) { ModSettingsPage(mod: mod, m: m) }
+                        if env == Self.modsPage { ModsBrowserPage(m: m) { modPage.append($0) } }
+                        else if let mod = m.settings.first(where: { $0.env == env }) { ModSettingsPage(mod: mod, m: m) }
                     }
                 }
                 .frame(width: geometry.size.width * 2 / 3)

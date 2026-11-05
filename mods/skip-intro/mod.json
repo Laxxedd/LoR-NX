@@ -4,6 +4,7 @@
   "description": "The Skip Intro exefs patch of Library-of-Ruina-NX-Mods (the author's personal patch), for Library of Ruina 1.0.3.",
   "launcher": {
     "env": "DM_MOD_SKIPINTRO",
+    "category": "Quality of Life",
     "label": "Skip Intro",
     "note": "Automatically skips the AMV on startup. Original mod by trilliance"
   },

@@ -4,6 +4,7 @@
   "description": "Port of Cyaminthe's Enhanced Combat Page View (Workshop 2802216129) as a host callback on an observation gate: the combat pages in the hand are zoomed (x1.25, 25% bigger, by default). For Library of Ruina 1.0.3.",
   "launcher": {
     "env": "DM_MOD_ECPV",
+    "category": "Quality of Life",
     "label": "Enhanced Combat Page View",
     "note": "Gives you the ability to Zoom-in combat pages on your hand, along with other fixes. Original mod by [Cyaminthe’s Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=2802216129)"
   },

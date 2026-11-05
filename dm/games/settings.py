@@ -65,6 +65,7 @@ def mod_rows(path, taken):
         if not r.get('label'): sys.exit(f'DM_MODS_SETTINGS: {env} has no label')
         kind = r.get('kind', 'toggle')
         row = {'env': env, 'kind': kind, 'section': MODS_SECTION, 'label': r['label'], 'note': r.get('note', '')}
+        if r.get('category'): row['category'] = r['category']
         if kind == 'toggle':
             on, off = r.get('on', '1'), r.get('off', '0')   # a switch can read the other way (on 0 / off 1: a Disable ... switch); the default is the value the variable takes
             row.update({'default': r['default'] if r.get('default') in (on, off) else off, 'on': on, 'off': off})

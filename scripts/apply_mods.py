@@ -18,6 +18,7 @@ import argparse, glob, json, os, re, shutil, struct, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIRST_GATE, LAST_GATE = 32, 63
+CATEGORIES = ('Performance', 'Quality of Life', 'Content', 'Miscellaneous', 'Cheats')   # the groups of the launcher's mods page, in the order shown; mod.json launcher "category" (default Miscellaneous)
 NSO_HEADER = 0x100   # Atmosphere's IPS offsets and the .pchtxt addresses of a patch without offset_shift count from the start of the NSO file, whose header is 0x100 bytes: the text starts there
 MAX_SWITCHES = 0xE00   # dm/tools/nso_switch.py SWITCH_MAX
 
@@ -102,7 +103,7 @@ def main():
         print('no mods selected'); return
     os.makedirs(a.out)
     defs, obs, number, launcher, switch, switch_env = [], {}, FIRST_GATE, [], {}, []
-    launcher_groups = []   # (launcher.order, mod id, rows): the Mods section lists the mods by order, then id (mod.json launcher "order", default 0)
+    launcher_groups = []   # (launcher.order, mod id, rows): the Mods section lists the mods by order, then id (mod.json launcher "order", default 0; the launcher's mods page groups them by launcher "category")
     for mid in sorted(set(want)):
         d = os.path.join(ROOT, 'mods', mid)
         with open(os.path.join(d, 'mod.json'), encoding='utf-8') as f: mod = json.load(f)
@@ -123,7 +124,9 @@ def main():
         lc = mod.get('launcher', {})
         env = lc.get('env', f'DM_MOD_{ident(mid)}')
         if not re.fullmatch(r'DM_[A-Z0-9_]+', env): sys.exit(f'[RED] {mid}: launcher env {env!r} must match DM_[A-Z0-9_]+')
-        rows = [{'env': env, 'kind': 'toggle', 'section': 'Mods', 'label': lc.get('label', mod.get('title', mid)),
+        category = lc.get('category', 'Miscellaneous')
+        if category not in CATEGORIES: sys.exit(f'[RED] {mid}: launcher category {category!r} must be one of {", ".join(CATEGORIES)}')
+        rows = [{'env': env, 'kind': 'toggle', 'section': 'Mods', 'category': category, 'label': lc.get('label', mod.get('title', mid)),
                  'note': lc.get('note', mod.get('description', '')), 'default': '0', 'on': '1', 'off': '0'}]
         for st in mod.get('settings', []):
             if not re.fullmatch(r'DM_[A-Z0-9_]+', st.get('env', '')): sys.exit(f'[RED] {mid}: setting env {st.get("env")!r} must match DM_[A-Z0-9_]+')

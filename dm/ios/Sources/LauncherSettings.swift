@@ -5,6 +5,7 @@ import Combine
 struct Setting: Decodable, Identifiable {
     let env, kind, label, note, def: String
     let section: String?   // heading on the settings screen; absent in older bundles
+    let category: String?  // a mod's group on the iPhone's mods page (LauncherModel.modCategories); absent: Miscellaneous
     let needs: String?     // "<VAR>=<value>": a sub-setting, drawn only while that setting has that value
     let level: String?     // "basic": shown first (the Mac window's Basic settings); any other or none: Advanced settings. The iPhone keeps one list
     let base: Base?        // render scale: the 3D views' size at 1.0, docked and handheld, for the size in pixels (the Mac window)
@@ -31,7 +32,7 @@ struct Setting: Decodable, Identifiable {
         default: return true
         }
     }
-    enum CodingKeys: String, CodingKey { case env, kind, label, note, def = "default", section, needs, level, base, options, min, max, step, on, off, format }
+    enum CodingKeys: String, CodingKey { case env, kind, label, note, def = "default", section, category, needs, level, base, options, min, max, step, on, off, format }
 }
 struct SettingsFile: Decodable { let settings: [Setting] }
 
@@ -81,6 +82,14 @@ final class LauncherModel: ObservableObject {
         let key = String(n[n.startIndex..<eq])
         return settings.contains { $0.env == key && $0.sectionTitle == Self.modsSection } ? key : nil
     }
+    static let modCategories = ["Performance", "Quality of Life", "Content", "Miscellaneous", "Cheats"]
+    func mods(in category: String) -> [Setting] {   // the mods (not their settings) of one group of the mods page, in the list's order; a mod with no or an unknown category is Miscellaneous
+        topRows(in: Self.modsSection).filter { s in
+            let c = s.category.flatMap { Self.modCategories.contains($0) ? $0 : nil } ?? "Miscellaneous"
+            return c == category
+        }
+    }
+    var modsOn: Int { topRows(in: Self.modsSection).filter { (values[$0.env] ?? $0.def) == $0.onValue }.count }
     func modSettings(of mod: Setting) -> [Setting] { settings.filter { modEnv(of: $0) == mod.env } }   // all of them, shown or not
     func topRows(in section: String) -> [Setting] { rows(in: section).filter { modEnv(of: $0) == nil } }   // the list's rows without a mod's own settings
     // The Mac window: Basic settings first, then Advanced settings, each in the list's sections and order

@@ -4,6 +4,7 @@
   "description": "Port of XDTM's Counter Dice Retain (Workshop 2787425839) as host callbacks on observation gates: a counter (Standby) die is not used up and keeps answering further attacks until it loses a clash, as in Early Access. For Library of Ruina 1.0.3.",
   "launcher": {
     "env": "DM_MOD_COUNTERDICERETAIN",
+    "category": "Quality of Life",
     "label": "Retain Counter Dice",
     "note": "Counter Dices are kept and used against multiple attacks until it loses a clash, just like how it worked during Early Access. Original mod by [XDTM’s Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=2787425839)"
   },

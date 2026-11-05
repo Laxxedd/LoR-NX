@@ -4,6 +4,7 @@
   "description": "The Switch exefs patch Patty Optimization of Library-of-Ruina-NX-Mods, including its Crying Children variant, for Library of Ruina 1.0.3.",
   "launcher": {
     "env": "DM_MOD_PATTYOPT",
+    "category": "Performance",
     "label": "Patty Optimization",
     "note": "Several Unity-engine based optimization fixes. Original mod by [PattyHoswell’s NexusMods page](https://www.nexusmods.com/libraryofruina/mods/174)"
   },
