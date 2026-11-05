@@ -10,7 +10,9 @@
   },
   "game": "Library of Ruina 1.0.3",
   "gates": [
-    "touch_count"
+    "touch_count",
+    "getter",
+    "poll"
   ],
   "host": "host.c",
   "exefs": "exefs",
@@ -29,6 +31,18 @@
         "offset": "0x16f05e8",
         "word": "7100001f",
         "reason": "LOR_InputModule.ProcessTouchEvents tail (RVA 0x16f0450): cmp w0, #0 after the input.touchCount call, w0 = touchCount; runs every frame the module processes"
+      },
+      {
+        "gate": "getter",
+        "offset": "0x842fbc",
+        "word": "7100011f",
+        "reason": "native touch getter (0x842fb8): ldrb w8,[x0,#24]; cmp w8,#0 selects 0 or [x0+2272]; x0 = the object, w8 = the flag"
+      },
+      {
+        "gate": "poll",
+        "offset": "0x84307c",
+        "word": "f9400008",
+        "reason": "Unity's native touch poll (0x84304c, called from the GetTouchScreenStates<16> read at 0x8430b4): ldr x8,[x0] with x0 = this, before it is copied to x19"
       }
     ]
   }
