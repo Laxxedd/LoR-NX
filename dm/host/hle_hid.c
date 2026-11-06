@@ -483,6 +483,16 @@ uint64_t dm_cheats_keys(void) {
     if (a[3] < -STICK_THRESH) b |= 1u << 23;
     return b;
 }
+// The keys the mods read (mods/README.md, "Input"): dm_cheats_keys plus DM_MOD_KEY_ALT while the front end's Alt key is held in Touchscreen Mode (hle_touch.c). dm_cheats_keys itself is unchanged: the cheat VM never sees Alt
+int dm_touchscreen_mode(void);
+uint32_t dm_key_modifiers(void);
+uint64_t dm_mod_keys(void) {
+    uint64_t k = dm_cheats_keys();
+    if (dm_touchscreen_mode() && (dm_key_modifiers() & DM_KEY_ALT)) k |= DM_MOD_KEY_ALT;
+    return k;
+}
+// The mods' special button: R3 on a gamepad, Alt in Touchscreen Mode (where there is no R3), as a bit of dm_mod_keys
+uint64_t dm_mod_special(void) { return dm_touchscreen_mode() ? DM_MOD_KEY_ALT : DM_BTN_RS; }
 // GetNpadStates(out, n, id): newest first, n entries: the current state repeated with consecutive sampling numbers. The host keeps no history, but on hardware the
 // 16-entry history is always full, and games read all of it whatever count comes back: Super Mario Odyssey (main+0x93fc20) polls every controller slot each frame, which advances
 // the shared sampling number by about 16 per frame, and with only entry 0 written neither stick did anything in play (the camera did not turn at its first hint) while buttons
@@ -731,18 +741,29 @@ HLE_FORCE("_ZN2nn3hid18SendVibrationValueERKNS0_21VibrationDeviceHandleERKNS0_14
 HLE_FORCE("_ZN2nn3hid6detail19SendVibrationValuesEPKNS0_21VibrationDeviceHandleEPKNS0_14VibrationValueEi", "vibration batch: update all channels atomically", Result, h_hid_SendVibs, const uint32_t *h, const dm_vibration *v, int n) { vib_send(h, v, n); return RES_OK; }
 // Mouse / keyboard: not connected
 HLE_FORCE("_ZN2nn3hid15InitializeMouseEv", "mouse; not provided by the host", void, h_hid_InitMouse, void) {}
-HLE_FORCE("_ZN2nn3hid14GetMouseStatesEPNS0_10MouseStateEi", "mouse states: 0 entries", int, h_hid_MouseStates, void *out, int n) { (void)out; (void)n; return 0; }
+// Touchscreen Mode (DM_TOUCHSCREEN=1): the front end's touchpad is a connected mouse and its Shift / Ctrl / Alt keys a connected keyboard's modifiers (hle_touch.c mouse_fill / keyboard_fill)
+int mouse_fill(void *out, int n, int64_t top);
+int keyboard_fill(void *out, int n, int64_t top);
+HLE_FORCE("_ZN2nn3hid14GetMouseStatesEPNS0_10MouseStateEi", "mouse states: the touchpad in Touchscreen Mode, otherwise 0 entries", int, h_hid_MouseStates, void *out, int n) {
+    if (n <= 0) return 0;
+    return mouse_fill(out, n, atomic_fetch_add(&g_sampling, 1) + 1);
+}
 // Single state (13 Sentinels calls it every frame; without the hook the sdk aborts on its uninitialized mouse resource): MouseState is 0x28 bytes {sampling number i64, x, y, dx, dy, wheel dx, dy, buttons, attributes}; attributes 0 = not connected
-HLE_FORCE("_ZN2nn3hid13GetMouseStateEPNS0_10MouseStateE", "mouse state: not connected (MouseState 0x28 bytes zeroed)", void, h_hid_MouseState, void *s) {
-    memset(s, 0, 0x28); ((int64_t *)s)[0] = atomic_fetch_add(&g_sampling, 1) + 1;
+HLE_FORCE("_ZN2nn3hid13GetMouseStateEPNS0_10MouseStateE", "mouse state: the touchpad in Touchscreen Mode, otherwise not connected (MouseState 0x28 bytes zeroed)", void, h_hid_MouseState, void *s) {
+    int64_t top = atomic_fetch_add(&g_sampling, 1) + 1;
+    if (mouse_fill(s, 1, top)) return;
+    memset(s, 0, 0x28); ((int64_t *)s)[0] = top;
 }
 HLE_FORCE("_ZN2nn3hid18InitializeKeyboardEv", "keyboard; not provided by the host", void, h_hid_InitKbd, void) {}
-HLE_FORCE("_ZN2nn3hid16GetKeyboardStateEPNS0_13KeyboardStateE", "keyboard state: not connected (KeyboardState 0x30 bytes zeroed)", void, h_hid_KbdState, void *s) {
-    memset(s, 0, 0x30); ((int64_t *)s)[0] = atomic_fetch_add(&g_sampling, 1) + 1;
+HLE_FORCE("_ZN2nn3hid16GetKeyboardStateEPNS0_13KeyboardStateE", "keyboard state: the touchscreen keys' modifiers in Touchscreen Mode, otherwise not connected (KeyboardState 0x30 bytes zeroed)", void, h_hid_KbdState, void *s) {
+    int64_t top = atomic_fetch_add(&g_sampling, 1) + 1;
+    if (keyboard_fill(s, 1, top)) return;
+    memset(s, 0, 0x30); ((int64_t *)s)[0] = top;
 }
 // The history form (Monster Hunter Rise): every requested entry, newest first, with consecutive sampling numbers, as GetNpadStates fills them
-HLE_FORCE("_ZN2nn3hid17GetKeyboardStatesEPNS0_13KeyboardStateEi", "keyboard state history: not connected (each 0x30-byte entry zeroed)", int, h_hid_KbdStates, uint8_t *s, int n) {
+HLE_FORCE("_ZN2nn3hid17GetKeyboardStatesEPNS0_13KeyboardStateEi", "keyboard state history: the touchscreen keys' modifiers in Touchscreen Mode, otherwise not connected (each 0x30-byte entry zeroed)", int, h_hid_KbdStates, uint8_t *s, int n) {
     int64_t top = atomic_fetch_add(&g_sampling, 1) + 1;
+    if (keyboard_fill(s, n, top)) return n;
     for (int i = 0; i < n; i++) { memset(s + 0x30 * i, 0, 0x30); *(int64_t *)(s + 0x30 * i) = top - i; }
     return n > 0 ? n : 0;
 }

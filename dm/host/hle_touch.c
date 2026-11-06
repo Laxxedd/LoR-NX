@@ -180,3 +180,86 @@ int gesture_fill(void *out, int n, uint64_t now_ns) {
     pthread_mutex_unlock(&g_tl);
     return k;
 }
+
+// Virtual mouse and keyboard modifiers (Touchscreen Mode, front.h): the iOS touchpad moves a cursor on the 1280x720 panel and presses the mouse buttons / wheel, and its Shift / Ctrl / Alt keys are the keyboard's modifier keys.
+// hle_hid.c answers nn::hid::GetMouseState(s) and GetKeyboardState(s) from them while DM_TOUCHSCREEN=1 and keeps its "not connected" answers otherwise.
+// MouseState (0x28 bytes): +0 sampling number, +8 x, +0xc y, +0x10 delta x, +0x14 delta y, +0x18 wheel delta x, +0x1c wheel delta y, +0x20 buttons (bit0 left, bit1 right), +0x24 attributes (bit0 transferable, bit1 connected).
+// KeyboardState (0x30 bytes, = libnx HidKeyboardState): +0 sampling number, +8 modifiers (bit0 Control, bit1 Shift, bit2 left Alt), +0x10 key bit set (bit n = USB usage n: left Control 224, left Shift 225, left Alt 226).
+// Movement, wheel and short presses are handed over once: what happened since the last read is in the newest entry, the older entries repeat the buttons of the read before it with no movement.
+#define PANEL_W 1280
+#define PANEL_H 720
+static pthread_mutex_t g_ml = PTHREAD_MUTEX_INITIALIZER;
+static float g_mx = PANEL_W / 2, g_my = PANEL_H / 2, g_mdx, g_mdy;   // the cursor; movement not yet read (the fraction a read cannot report stays)
+static int g_mwy;                                                    // wheel notches not yet read
+static uint32_t g_mheld, g_mlatch, g_mprev;                          // mouse buttons: held now, pressed since the last read, reported by the last read
+static uint32_t g_kheld, g_klatch, g_kprev;                          // keyboard modifiers, the same way
+
+static int trackpad_on(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_TOUCHSCREEN"); v = e && atoi(e); } return v; }
+static int trackpad_touch(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_TRACKPAD_TOUCH"); v = e && atoi(e); } return v; }
+static void trackpad_touch_push(int down) {   // DM_TRACKPAD_TOUCH: the left button as finger 0 at the cursor (called with g_ml held)
+    dm_touch t = {0, g_mx / PANEL_W, g_my / PANEL_H};
+    if (t.x > 0.999f) { t.x = 0.999f; }
+    if (t.y > 0.999f) { t.y = 0.999f; }
+    dm_touch_set(&t, down ? 1 : 0);
+}
+void dm_mouse_move(float dx, float dy) {
+    pthread_mutex_lock(&g_ml);
+    float nx = fminf(fmaxf(g_mx + dx, 0), PANEL_W - 1), ny = fminf(fmaxf(g_my + dy, 0), PANEL_H - 1);
+    g_mdx += nx - g_mx; g_mdy += ny - g_my; g_mx = nx; g_my = ny;
+    if (trackpad_touch() && (g_mheld & DM_MOUSE_LEFT)) trackpad_touch_push(1);
+    pthread_mutex_unlock(&g_ml);
+}
+void dm_mouse_button(uint32_t mask, int down) {
+    pthread_mutex_lock(&g_ml);
+    if (down) { g_mheld |= mask; g_mlatch |= mask; } else g_mheld &= ~mask;
+    if (trackpad_touch() && (mask & DM_MOUSE_LEFT)) trackpad_touch_push(down);
+    pthread_mutex_unlock(&g_ml);
+}
+void dm_mouse_wheel(int notches) { pthread_mutex_lock(&g_ml); g_mwy += notches; pthread_mutex_unlock(&g_ml); }
+void dm_key_modifier(uint32_t mask, int down) {
+    pthread_mutex_lock(&g_ml);
+    if (down) { g_kheld |= mask; g_klatch |= mask; } else g_kheld &= ~mask;
+    pthread_mutex_unlock(&g_ml);
+}
+
+int dm_touchscreen_mode(void) { return trackpad_on(); }   // for hle_hid.c: the mods' special button is Alt in Touchscreen Mode
+uint32_t dm_key_modifiers(void) { pthread_mutex_lock(&g_ml); uint32_t k = g_kheld; pthread_mutex_unlock(&g_ml); return k; }   // the DM_KEY_* modifiers held now (no latch: nothing is consumed)
+
+// Fills n MouseStates (newest first; entry i has sampling number top - i); returns n, or 0 when the mouse is not connected (not Touchscreen Mode)
+int mouse_fill(void *out, int n, int64_t top) {
+    if (!trackpad_on() || n <= 0) return 0;
+    uint8_t *o = out;
+    pthread_mutex_lock(&g_ml);
+    uint32_t now = g_mheld | g_mlatch;
+    if (trackpad_touch()) now &= ~(uint32_t)DM_MOUSE_LEFT;
+    float wx = truncf(g_mdx), wy = truncf(g_mdy); g_mdx -= wx; g_mdy -= wy;
+    for (int i = 0; i < n; i++) {
+        int32_t v[6] = {(int32_t)g_mx, (int32_t)g_my, i ? 0 : (int32_t)wx, i ? 0 : (int32_t)wy, 0, i ? 0 : g_mwy};
+        uint32_t buttons = i ? g_mprev : now, attr = 3;
+        int64_t samp = top - i;
+        uint8_t *s = o + 0x28 * (size_t)i;
+        memcpy(s, &samp, 8); memcpy(s + 8, v, 24); memcpy(s + 0x20, &buttons, 4); memcpy(s + 0x24, &attr, 4);
+    }
+    g_mwy = 0; g_mprev = now; g_mlatch = 0;
+    pthread_mutex_unlock(&g_ml);
+    return n;
+}
+
+// Fills n KeyboardStates (newest first); returns n, or 0 when the keyboard is not connected (not Touchscreen Mode)
+int keyboard_fill(void *out, int n, int64_t top) {
+    if (!trackpad_on() || n <= 0) return 0;
+    uint8_t *o = out;
+    pthread_mutex_lock(&g_ml);
+    uint32_t now = g_kheld | g_klatch;
+    for (int i = 0; i < n; i++) {
+        uint32_t m = i ? g_kprev : now;   // DM_KEY_CTRL / SHIFT / ALT are bits 0 / 1 / 2, as are the modifier bits and the key bits 224 / 225 / 226
+        uint64_t mods = m & 7; int64_t samp = top - i;
+        uint8_t *s = o + 0x30 * (size_t)i;
+        memset(s, 0, 0x30);
+        memcpy(s, &samp, 8); memcpy(s + 8, &mods, 8);
+        s[0x10 + 224 / 8] = (uint8_t)(m & 7);
+    }
+    g_kprev = now; g_klatch = 0;
+    pthread_mutex_unlock(&g_ml);
+    return n;
+}

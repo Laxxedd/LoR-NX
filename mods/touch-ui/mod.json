@@ -6,7 +6,8 @@
     "env": "DM_MOD_TOUCHUI",
     "category": "Quality of Life",
     "label": "Touch UI",
-    "note": "Disables console mode."
+    "note": "Disables console mode.",
+    "forced": "DM_TOUCHSCREEN=1"
   },
   "game": "Library of Ruina 1.0.3",
   "gates": [

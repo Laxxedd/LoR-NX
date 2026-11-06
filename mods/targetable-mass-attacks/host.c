@@ -1,11 +1,11 @@
 // Mod "targetable-mass-attacks": Cyaminthe's Targetable Mass Attacks (Steam Workshop 2803192752), as host callbacks on observation gates.
 // The PC mod is a set of Harmony patches around a mouse mode ("click twice on a speed die that holds a mass attack, then click a target die"). A controller has no such click, so this port is a small
-// selector of its own, opened with R3 (the mods' special button, mods/README.md):
-//   R3 while an ally speed die is selected (or focused) and the page in it has sub-targets (BattlePlayingCardDataInUnitModel.subTargets is not empty): the selector opens on the first sub-target.
+// selector of its own, opened with R3, or Alt in Touchscreen Mode (the mods' special button, mods/README.md):
+//   R3 / Alt while an ally speed die is selected (or focused) and the page in it has sub-targets (BattlePlayingCardDataInUnitModel.subTargets is not empty): the selector opens on the first sub-target.
 //   Left / Right (D-pad or left stick) move a cursor over the speed dice that can take that sub-target, A sets it and moves on to the next sub-target arrow, and after the last one the selector closes.
-//   B or R3 close it at once (the sub-targets set so far stay).
+//   B or R3 / Alt close it at once (the sub-targets set so far stay).
 // While the selector is open the host hides A, B, X, Y, L, R, the D-pad and the left stick from the game (dm_mod_input_mask, dm/host/hle_hid.c), so the game's own targeting does not also act on them; the keys are read
-// from dm_cheats_keys, which the mask does not touch. The mask lapses on its own a quarter of a second after the last refresh, and is held after the selector closes until the keys are up again, so the A that
+// from dm_mod_keys, which the mask does not touch. The mask lapses on its own a quarter of a second after the last refresh, and is held after the selector closes until the keys are up again, so the A that
 // set the last sub-target does not become a new press for the game.
 //   frame_pre  BattleUnitTargetArrowManagerUI.Update entry (x0 = the arrow manager, once a frame in a battle): key edges, the mask, and the selector's steps
 //   ui_pre     BattleManagerUI.Init / set_selectedAllyDice entry (x0 = the BattleManagerUI): remembered, with a new battle the selector starts over
@@ -141,7 +141,7 @@ static void open_run(uint64_t *r, int param) {
     if (!card || field_int(field(card, F_CARD_OWNER), F_UNIT_FACTION) != FACTION_PLAYER) return;   // not a page of the player's with sub-targets
     s_anchor = ui; s_card = card; s_arrow = 0; s_active = 1; s_lit = NULL;
     build_cands();
-    if (first_hits(0)) LOG("[mod targetable-mass-attacks] R3: selector open on page %#llx, %d sub-target(s), %d die(s) for the first", (unsigned long long)(uintptr_t)card, list_count(field(card, F_CARD_SUBTARGETS)), s_nc);
+    if (first_hits(0)) LOG("[mod targetable-mass-attacks] R3 / Alt: selector open on page %#llx, %d sub-target(s), %d die(s) for the first", (unsigned long long)(uintptr_t)card, list_count(field(card, F_CARD_SUBTARGETS)), s_nc);
 }
 
 // One frame of the open selector (guest stack: the game's functions run here)
@@ -152,7 +152,7 @@ static void step_run(uint64_t *r, int param) {
     void *ui = field(s_bmui, F_BMUI_SELECTED_ALLY);
     if (!ui) ui = field(s_bmui, F_BMUI_FOCUSED);
     if (ui != s_anchor || mass_card(ui) != s_card || s_arrow >= list_count(field(s_card, F_CARD_SUBTARGETS))) { close_selector(); return; }
-    if (s_edges & (DM_BTN_B | DM_BTN_RS)) { close_selector(); return; }
+    if (s_edges & (DM_BTN_B | dm_mod_special())) { close_selector(); return; }
     if (s_nc <= 0) { build_cands(); if (s_nc <= 0) { close_selector(); return; } }
     if (s_edges & (DM_BTN_LEFT | KEY_STICK_L_LEFT)) { s_cur = (s_cur + s_nc - 1) % s_nc; light(dice_ui(s_cand[s_cur].unit, s_cand[s_cur].slot)); }
     if (s_edges & (DM_BTN_RIGHT | KEY_STICK_L_RIGHT)) { s_cur = (s_cur + 1) % s_nc; light(dice_ui(s_cand[s_cur].unit, s_cand[s_cur].slot)); }
@@ -190,17 +190,17 @@ static void on_ui_pre(uint64_t *r, int p) {
     }
 }
 
-// A frame's work is the key read; the game's functions run (dm_mod_gate_run) on R3 while closed and on every frame while the selector is open
+// A frame's work is the key read; the game's functions run (dm_mod_gate_run) on R3 / Alt while closed and on every frame while the selector is open
 static void on_frame_pre(uint64_t *r, int p) {
     if (!mod_enabled()) return;
-    uint64_t keys = dm_cheats_keys();
+    uint64_t keys = dm_mod_keys();
     s_edges = keys & ~s_prev;
     s_prev = keys;
     if (s_active) { dm_mod_input_mask(KEYS_HIDDEN, 250); dm_mod_gate_run(r, p, step_run); }
     else if (s_hold) {
         if (keys & KEYS_HIDDEN) dm_mod_input_mask(KEYS_HIDDEN, 250);   // the key that closed it is still down
         else s_hold = 0;
-    } else if (s_edges & DM_BTN_RS) dm_mod_gate_run(r, p, open_run);
+    } else if (s_edges & dm_mod_special()) dm_mod_gate_run(r, p, open_run);
 }
 
 __attribute__((constructor)) static void mod_targetable_mass_attacks_attach(void) {

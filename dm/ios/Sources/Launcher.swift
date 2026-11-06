@@ -102,7 +102,8 @@ private struct LauncherView: View {
     @State private var modPage: [String] = []   // the pages pushed on the list: the mods page (modsPage) and a mod's settings page (its env): the navigation stack's path
     private static let modsPage = "mods"   // not a DM_ name, so never a mod's env
 
-    // Opens the layout editor of the Swipe touch layout (GestureLayoutEditor.swift). It is the only touch layout
+    // Opens the layout editor of the Swipe touch layout (GestureLayoutEditor.swift). It is the only touch layout.
+    // Touchscreen Mode hides the swipe gamepad, so the button stays but is greyed out
     private var swipeEditorButton: some View {
         Button { editingSwipeLayout = true } label: {
             HStack {
@@ -111,6 +112,7 @@ private struct LauncherView: View {
                 Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
             }
         }
+        .disabled(m.values["DM_TOUCHSCREEN"] == "1")
     }
 
     // The Mods section is one button: the mods themselves, grouped by category, are on the page it opens (ModsBrowserPage)
@@ -190,13 +192,13 @@ private struct LauncherView: View {
                                 if !rows.isEmpty {
                                     Section(section) {
                                         ForEach(rows) { s in SettingRow(s: s, m: m) }
-                                        if section == "Controls" && m.values["DM_TOUCHSCREEN"] != "1" { swipeEditorButton }   // Touchscreen Mode hides the swipe gamepad, so its editor too
+                                        if section == "Controls" { swipeEditorButton }
                                     }
                                 }
                             }
                         }
                         if m.rows(in: "Controls").isEmpty {   // a game with no controls settings still gets the editor
-                            Section("Controls") { if m.values["DM_TOUCHSCREEN"] != "1" { swipeEditorButton } }
+                            Section("Controls") { swipeEditorButton }
                         }
                         Section {
                             Button("Reset to tested defaults") { m.reset() }

@@ -1,12 +1,12 @@
 {
   "id": "targetable-mass-attacks",
   "title": "Targetable Mass Attacks (Library of Ruina)",
-  "description": "Port of Cyaminthe's Targetable Mass Attacks (Workshop 2803192752) as host callbacks on observation gates: R3 on a speed die that holds a mass attack opens a selector for its sub-targets, one arrow after the other. For Library of Ruina 1.0.3.",
+  "description": "Port of Cyaminthe's Targetable Mass Attacks (Workshop 2803192752) as host callbacks on observation gates: R3 (or Alt in Touchscreen Mode) on a speed die that holds a mass attack opens a selector for its sub-targets, one arrow after the other. For Library of Ruina 1.0.3.",
   "launcher": {
     "env": "DM_MOD_TARGETABLEMASSATTACKS",
     "category": "Quality of Life",
     "label": "Targetable Mass Attacks",
-    "note": "Allows you to individually adjust sub-targets of Mass Attacks, activate by pressing R3 on a dice that’s using one. Original mod by [Cyaminthe’s Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=2803192752)"
+    "note": "Allows you to individually adjust sub-targets of Mass Attacks, activate by pressing R3 or ALT on a dice that’s using one. Original mod by [Cyaminthe’s Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=2803192752)"
   },
   "game": "Library of Ruina 1.0.3",
   "gates": [

@@ -4,7 +4,7 @@ Each folder is one mod. Every mod in this folder is built into every IPA, and ea
 
 ```
 mods/<id>/
-  mod.json   id, title, launcher (env, label, note of its switch, category: Performance, Quality of Life, Content, Miscellaneous (default) or Cheats; the group on the launcher's mods page), gates (names), obs (gate rows per build of main), host (C file), romfs (folder)
+  mod.json   id, title, launcher (env, label, note of its switch, category: Performance, Quality of Life, Content, Miscellaneous (default) or Cheats; the group on the launcher's mods page; forced: `<DM_VAR>=<value>`, a launcher setting that turns the switch on and locks it on while it has that value, as Touchscreen Mode does for touch-ui), gates (names), obs (gate rows per build of main), host (C file), romfs (folder)
   host.c     callbacks for the gates (call dm_mod_gate_run from dm/host/hle_modcall.c to run on the guest stack); attaches them from a constructor with gate_obs_set(), and returns from each callback while its env switch is not 1 (read at the first gate hit: the launcher's choices are not in the environment yet when constructors run)
   romfs/     files for the RomFS overlay (Data/StreamingAssets/... as in the game's RomFS)
 ```
@@ -14,6 +14,10 @@ How it works: `scripts/apply_mods.py` numbers the gates (32-63), copies `host.c`
 `dm/games/settings.py` is the one repo file this framework edits for the launcher (a `Mods` section and `mod_rows`).
 
 Add a mod: copy `speed-dice/`, change the id, gates and `host.c`.
+
+## Input
+
+A mod reads keys with `dm_mod_keys()` (`dm/host/dm_input.h`): the bits of `dm_cheats_keys()` (every controller, the touch gamepad and the keyboard) and, in Touchscreen Mode, `DM_MOD_KEY_ALT` while the Alt key of the touchscreen keyboard is held. The mods' **special button** is `dm_mod_special()`: R3 (`DM_BTN_RS`), or Alt in Touchscreen Mode, where there is no R3. A mod that opens on the special button tests `dm_mod_keys() & dm_mod_special()` and describes it in its launcher note as "R3 or ALT" (Targetable Mass Attacks, Re-Extraction).
 
 ## Exefs patch mods
 

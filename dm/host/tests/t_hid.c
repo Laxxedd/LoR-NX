@@ -33,6 +33,9 @@ void dm_touch_set(const dm_touch *t, int n) { touch_to(t, n); void (*o)(const dm
 void dm_touch_script(const dm_touch *t, int n) { touch_to(t, n); }
 int touch_fill_n(void *out, int max, uint64_t now) { (void)out; (void)max; (void)now; return 0; }
 int gesture_fill(void *out, int n, uint64_t now) { (void)out; (void)n; (void)now; return 0; }
+static int g_touchscreen; static uint32_t g_modifiers;   // Touchscreen Mode and the modifier keys held (hle_touch.c)
+int dm_touchscreen_mode(void) { return g_touchscreen; }
+uint32_t dm_key_modifiers(void) { return g_modifiers; }
 void dm_gfx_shot_at(long frame, const char *path) { (void)frame; (void)path; }
 void hle_bind_system_event(void *g, int autoclear) { (void)g; (void)autoclear; }
 void hle_signal_system_event(void *g) { g_signalled = g; g_signals++; }
@@ -484,9 +487,27 @@ static void t_motion_hid(void) {
     dm_pad_players(1); g_phone_mode = -1;
 }
 
+// The mods' special button: R3 on a gamepad, Alt in Touchscreen Mode (dm_mod_keys / dm_mod_special)
+static void t_mod_keys(void) {
+    g_touchscreen = 0; g_modifiers = 0;
+    CHECK(dm_mod_special() == DM_BTN_RS, "outside Touchscreen Mode the special button is R3");
+    g_modifiers = DM_KEY_ALT;
+    CHECK(!(dm_mod_keys() & DM_MOD_KEY_ALT), "outside Touchscreen Mode Alt is not reported to the mods");
+    g_touchscreen = 1; g_modifiers = 0;
+    CHECK(dm_mod_special() == DM_MOD_KEY_ALT, "in Touchscreen Mode the special button is Alt");
+    CHECK(!(dm_mod_keys() & dm_mod_special()), "Alt up: the special button is not down");
+    g_modifiers = DM_KEY_SHIFT | DM_KEY_CTRL;
+    CHECK(!(dm_mod_keys() & dm_mod_special()), "Shift and Ctrl are not the special button");
+    g_modifiers = DM_KEY_ALT;
+    CHECK((dm_mod_keys() & dm_mod_special()) != 0, "Alt held: the special button is down");
+    CHECK(!(dm_cheats_keys() & DM_MOD_KEY_ALT), "the cheat VM's mask never carries Alt");
+    g_touchscreen = 0; g_modifiers = 0;
+}
+
 int main(void) {
     CHECK(setenv("DM_RUMBLE_LOG", "1", 1) == 0, "enable rumble diagnostics");
     t_slots();
+    t_mod_keys();
     t_npads();
     t_script();
     t_vibration();

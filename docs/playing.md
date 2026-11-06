@@ -10,6 +10,8 @@ How to build and install a game: [README](../README.md#how-to-play).
 
 This fork has one touch layout, the swipe gamepad: swipes are the D-pad, a tap is A, a hold is B (or a dedicated B button, if you turn that setting on), and L, R, ZL, ZR, X, Y, − and + are outlined buttons. The right stick button is a scroller: hold it and move that finger up or down to scroll, or swipe with another finger while holding it to move the right stick. The default layout is the one the editor's **Reset** brings back. Place them in the launcher under Controls > Edit swipe controls layout. The 2D, 3D and Tap layouts and the layout button at the top centre are gone.
 
+With **Touchscreen Mode** on (Controls; it turns the touch-ui mod on for you) the swipe gamepad is replaced by a trackpad and a keyboard. Drag one finger anywhere to move the cursor like a laptop trackpad; a tap is a left click, touching and holding is a right click (held until you lift, so you can drag with it), and swiping up or down with two fingers scrolls. **Shift**, **Ctrl** and **Alt** sit at the bottom left, in that order, and count as held while a finger is on them; **Alt** is also the button that mods use R3 for (Targetable Mass Attacks, Re-Extraction). Each click, scroll step and key press gives a haptic tap unless **Touch feedback** is off.
+
 A connected game controller hides the touch controls and keeps every button.
 
 ## Rumble

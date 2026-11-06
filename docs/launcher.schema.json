@@ -31,7 +31,9 @@
         "base": {"description": "Render scale only: the 3D views' size the scale multiplies, docked and handheld, from the game's profile; absent for most games.", "type": "object", "required": ["docked", "handheld"],
                  "properties": {"docked": {"$ref": "#/$defs/size"}, "handheld": {"$ref": "#/$defs/size"}}},
         "level": {"description": "basic: a setting a front end shows first. Without it, the front end decides.", "const": "basic"},
-        "needs": {"description": "<VAR>=<value>: a sub-setting, drawn only while the row that sets <VAR> has that value. A row naming a variable this list does not have stays drawn.", "type": "string", "pattern": "^DM_[A-Z0-9_]+=[^;=]+$"}
+        "needs": {"description": "<VAR>=<value>: a sub-setting, drawn only while the row that sets <VAR> has that value. A row naming a variable this list does not have stays drawn.", "type": "string", "pattern": "^DM_[A-Z0-9_]+=[^;=]+$"},
+        "unless": {"description": "<VAR>=<value>: the row stays drawn but greyed out and unchangeable while the row that sets <VAR> has that value. A row naming a variable this list does not have stays enabled.", "type": "string", "pattern": "^DM_[A-Z0-9_]+=[^;=]+$"},
+        "forced": {"description": "<VAR>=<value> (a mod's switch): while the row that sets <VAR> has that value the switch is turned on and greyed out, so it cannot be turned off until that row changes; it then stays on until the player turns it off. A row naming a variable this list does not have is never forced.", "type": "string", "pattern": "^DM_[A-Z0-9_]+=[^;=]+$"}
       },
       "allOf": [
         {"if": {"properties": {"kind": {"const": "choice"}}}, "then": {"required": ["options"]}},

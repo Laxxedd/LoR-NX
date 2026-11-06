@@ -19,6 +19,7 @@ SCHEMA = 1   # launcher.json's version (docs/launcher.schema.json); it grows onl
 META = {
     'level': r'basic',                       # a setting a front end shows first; without it, the front end decides
     'needs': r'DM_[A-Z0-9_]+=[^;=]+',        # <VAR>=<value>: a sub-setting, drawn only while the row that sets <VAR> has that value
+    'unless': r'DM_[A-Z0-9_]+=[^;=]+',       # <VAR>=<value>: drawn greyed out and unchangeable while the row that sets <VAR> has that value
 }
 
 
@@ -71,6 +72,9 @@ def mod_rows(path, taken):
             row.update({'default': r['default'] if r.get('default') in (on, off) else off, 'on': on, 'off': off})
         else: row.update({k: r[k] for k in ('default', 'min', 'max', 'step', 'options', 'format') if k in r})
         if r.get('needs'): row['needs'] = r['needs']
+        if r.get('forced'):   # <VAR>=<value>: a mod's switch turned on and greyed out while the row that sets <VAR> has that value (touch-ui while Touchscreen Mode is on)
+            if not re.fullmatch(r'DM_[A-Z0-9_]+=[^;=]+', r['forced']): sys.exit(f'DM_MODS_SETTINGS: {env} forced {r["forced"]!r} must be <DM_VAR>=<value>')
+            row['forced'] = r['forced']
         out.append(row)
     return out
 
@@ -126,6 +130,11 @@ def build(gid, patched, control):
             if need not in table: sys.exit(f'settings.tsv:{n}: needs names a variable no row sets: {m["needs"]}')
             can = table[need]
             if can is not None and want not in can: sys.exit(f'settings.tsv:{n}: needs a value {need} never takes: {want} (it takes {", ".join(sorted(can))})')
+        if 'unless' in m:
+            need, want = m['unless'].split('=', 1)
+            if need not in table: sys.exit(f'settings.tsv:{n}: unless names a variable no row sets: {m["unless"]}')
+            can = table[need]
+            if can is not None and want not in can: sys.exit(f'settings.tsv:{n}: unless a value {need} never takes: {want} (it takes {", ".join(sorted(can))})')
         if not shown(cond, n): continue
         s = {'env': var, 'kind': kind, 'section': section, 'label': label, 'note': note, 'default': value(default, n), **m}
         if var == 'DM_RENDER_SCALE' and base: s['base'] = base   # the render scale in pixels, for the console mode chosen

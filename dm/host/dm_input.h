@@ -17,6 +17,11 @@ uint64_t dm_input_samples(void);   // Cumulative number of times the game has sa
 // merged axes' eight stick-direction bits (16..23), one flat bitset; no latches are consumed (the game's own reads
 // keep them). The NpadButton SL / SR bits (24 / 25) never fire: no input source of this host reports them
 uint64_t dm_cheats_keys(void);
+// What the mods read: dm_cheats_keys plus DM_MOD_KEY_ALT (bit 26) while the Alt key of Touchscreen Mode is held. The mods' special button is dm_mod_special(): DM_BTN_RS (R3), or DM_MOD_KEY_ALT in Touchscreen Mode,
+// so a mod tests (dm_mod_keys() & dm_mod_special()) and reads its edges from the same mask
+#define DM_MOD_KEY_ALT (1ull << 26)
+uint64_t dm_mod_keys(void);
+uint64_t dm_mod_special(void);
 // Hides keys from the game's reads for ms milliseconds from the call (the dm_cheats_keys bit layout; hle_hid.c): for mods that take a key over while their own UI is open; renew it each frame, it lapses by itself. dm_cheats_keys still sees them
 void dm_mod_input_mask(uint64_t keys, uint32_t ms);
 // Physical controller path (Mac / iOS GameController): stored separately from keyboard / touch and scripted input (DM_KEYS / DM_CTL); when the game reads player 1,

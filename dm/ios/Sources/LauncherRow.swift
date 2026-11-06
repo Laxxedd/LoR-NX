@@ -12,8 +12,10 @@ struct SettingRow: View {
 
     private var locked: Bool { m.fixed.contains(s.env) }
     private var note: String {
-        guard locked else { return s.note }
-        return (s.note.isEmpty ? "" : s.note + " · ") + (m.fromLaunch.contains(s.env) ? "Set at launch" : "Set by an env file")
+        var parts = s.note.isEmpty ? [] : [s.note]
+        if locked { parts.append(m.fromLaunch.contains(s.env) ? "Set at launch" : "Set by an env file") }
+        if let by = m.forcedBy(s) { parts.append("On while \(by) is on") }
+        return parts.joined(separator: " · ")
     }
     private var rangeValue: Binding<Double> {
         Binding(get: { Double(m.values[s.env] ?? s.def) ?? s.max ?? 1 },
@@ -55,7 +57,7 @@ struct SettingRow: View {
                 }
             }
         }
-        .disabled(locked)
+        .disabled(locked || m.greyedOut(s))
     }
 }
 
@@ -71,8 +73,10 @@ struct ModEntryRow: View {
     private static let chevronWidth: CGFloat = 8, chevronGap: CGFloat = 6
     private var locked: Bool { m.fixed.contains(s.env) }
     private var note: String {
-        guard locked else { return s.note }
-        return (s.note.isEmpty ? "" : s.note + " · ") + (m.fromLaunch.contains(s.env) ? "Set at launch" : "Set by an env file")
+        var parts = s.note.isEmpty ? [] : [s.note]
+        if locked { parts.append(m.fromLaunch.contains(s.env) ? "Set at launch" : "Set by an env file") }
+        if let by = m.forcedBy(s) { parts.append("On while \(by) is on") }
+        return parts.joined(separator: " · ")
     }
 
     var body: some View {
@@ -86,7 +90,7 @@ struct ModEntryRow: View {
             .onTapGesture(perform: open)
             Toggle(s.label, isOn: Binding(get: { (m.values[s.env] ?? s.def) == s.onValue }, set: { m.values[s.env] = $0 ? s.onValue : s.offValue }))
                 .labelsHidden()
-                .disabled(locked)
+                .disabled(locked || m.greyedOut(s))
         }
         .overlay(alignment: .trailing) {
             Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)

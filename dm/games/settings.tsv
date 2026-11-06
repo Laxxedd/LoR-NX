@@ -22,10 +22,10 @@ DM_PRESENT_UPSCALE	choice	off=Standard,metalfx=MetalFX	off	always	Game	Upscaling
 DM_LANG	choice	languages	build:DM_LANG	languages>1	Game	Game language		level=basic
 DM_FULLSCREEN	choice	0=Window,1=Fullscreen	0	platform:mac	Game	Display mode		level=basic
 DM_SHOW_FPS	toggle	-	build:DM_SHOW_FPS	platform:ios	Game	Frame-rate counter
-DM_TOUCHSCREEN	toggle	-	0	platform:ios	Controls	Touchscreen Mode	Enables touchscreen. Needs touch-ui mod to work
-DM_TOUCH_HAPTICS	toggle	-	1	platform:ios	Controls	Touch feedback		needs=DM_TOUCHSCREEN=0
-DM_HOLD_PLUS	toggle	-	0	platform:ios	Controls	Hold to confirm + button	The **+** button, used to confirm stageplays, burning books, combat phases & other important actions, will only activate if held.	needs=DM_TOUCHSCREEN=0
-DM_DEDICATED_B	toggle	-	0	platform:ios	Controls	Dedicated B button	Adds the B button to the controller scheme rather than using the hold-to-back out gesture.	needs=DM_TOUCHSCREEN=0
+DM_TOUCH_HAPTICS	toggle	-	1	platform:ios	Controls	Touch feedback
+DM_TOUCHSCREEN	toggle	-	0	platform:ios	Controls	Touchscreen Mode	Touchpad-style mouse and a keyboard layout instead of the gamepad. Turns the touch-ui mod on
+DM_HOLD_PLUS	toggle	-	0	platform:ios	Controls	Hold to confirm + button	The **+** button, used to confirm stageplays, burning books, combat phases & other important actions, will only activate if held.	unless=DM_TOUCHSCREEN=1
+DM_DEDICATED_B	toggle	-	0	platform:ios	Controls	Dedicated B button	Adds the B button to the controller scheme rather than using the hold-to-back out gesture.	unless=DM_TOUCHSCREEN=1
 DM_PRESENT_SNAP	toggle	-	DM_GAME_PRESENT_SNAP	gfxapi:nvn	Performance	Frame buffering	Up to one frame more display latency.
 DM_PSO_MTL4	toggle	-	DM_GAME_PSO_MTL4|1	gfxapi:nvn	Performance	Metal 4 pipelines	Keeps a pipeline archive; uses more memory.
 DM_PSO_PREBUILD	toggle	-	1	gfxapi:nvn	Performance	Pipeline prebuild	The first start waits a few minutes for it, once.	needs=DM_PSO_MTL4=1

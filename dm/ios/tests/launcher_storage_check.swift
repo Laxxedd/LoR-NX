@@ -46,6 +46,34 @@ import Foundation
         expect(m.rows(in: "Performance").contains { $0.env == "DM_PSO_MTL4" }, "the setting it depends on stays drawn")
         m.values["DM_PSO_MTL4"] = "1"
         expect(["DM_HOLD_PLUS", "DM_DEDICATED_B"].allSatisfy { e in m.rows(in: "Controls").contains { $0.env == e && $0.def == "0" } } && !m.rows(in: "Controls").contains { $0.env.hasPrefix("DM_RUMBLE") }, "Controls has the two touch toggles, off by default, and no rumble rows")
+        // "unless": the touch gamepad's rows stay drawn but greyed out while Touchscreen Mode is on; Touch feedback and Touchscreen Mode themselves never grey out
+        func row(_ env: String) -> Setting { file.settings.first { $0.env == env }! }
+        m.values["DM_TOUCHSCREEN"] = "0"
+        expect(["DM_HOLD_PLUS", "DM_DEDICATED_B"].allSatisfy { !m.greyedOut(row($0)) }, "the gamepad's rows are enabled while Touchscreen Mode is off")
+        m.values["DM_TOUCHSCREEN"] = "1"
+        expect(["DM_HOLD_PLUS", "DM_DEDICATED_B"].allSatisfy { e in m.greyedOut(row(e)) && m.rows(in: "Controls").contains { $0.env == e } }, "the gamepad's rows are greyed out, not hidden, while Touchscreen Mode is on")
+        expect(!m.greyedOut(row("DM_TOUCH_HAPTICS")) && !m.greyedOut(row("DM_TOUCHSCREEN")), "Touch feedback and Touchscreen Mode stay enabled")
+        expect(Array(m.rows(in: "Controls").map(\.env).prefix(2)) == ["DM_TOUCH_HAPTICS", "DM_TOUCHSCREEN"], "Touchscreen Mode comes right under Touch feedback")
+        m.values["DM_TOUCHSCREEN"] = "0"
+        // "forced": a mod's switch (touch-ui) is turned on and locked while Touchscreen Mode is on, and free again, still on, once it is off
+        let forcedJSON = #"{"settings":[{"env":"DM_TOUCHSCREEN","kind":"toggle","section":"Controls","label":"Touchscreen Mode","note":"","default":"0","on":"1","off":"0"},{"env":"DM_MOD_TOUCHUI","kind":"toggle","section":"Mods","category":"Quality of Life","label":"Touch UI","note":"","default":"0","on":"1","off":"0","forced":"DM_TOUCHSCREEN=1"}]}"#
+        let forcedRows = try! JSONDecoder().decode(SettingsFile.self, from: Data(forcedJSON.utf8)).settings
+        let fm = LauncherModel(forcedRows, defaults: d)
+        let touchUI = forcedRows[1]
+        expect(fm.values["DM_MOD_TOUCHUI"] == "0" && !fm.greyedOut(touchUI) && fm.forcedBy(touchUI) == nil, "the forced switch is free and off while Touchscreen Mode is off")
+        fm.values["DM_TOUCHSCREEN"] = "1"
+        expect(fm.values["DM_MOD_TOUCHUI"] == "1" && fm.greyedOut(touchUI) && fm.forcedBy(touchUI) == "Touchscreen Mode", "Touchscreen Mode turns the forced switch on and locks it")
+        fm.values["DM_MOD_TOUCHUI"] = "0"
+        expect(fm.values["DM_MOD_TOUCHUI"] == "1", "the forced switch cannot be turned off while Touchscreen Mode is on")
+        fm.values["DM_TOUCHSCREEN"] = "0"
+        expect(fm.values["DM_MOD_TOUCHUI"] == "1" && !fm.greyedOut(touchUI), "with Touchscreen Mode off the switch is free and stays on")
+        fm.values["DM_MOD_TOUCHUI"] = "0"
+        expect(fm.values["DM_MOD_TOUCHUI"] == "0", "..and can be turned off")
+        d.set("1", forKey: "launcher.DM_TOUCHSCREEN")
+        expect(LauncherModel(forcedRows, defaults: d).values["DM_MOD_TOUCHUI"] == "1", "a saved Touchscreen Mode turns the switch on at start")
+        d.removeObject(forKey: "launcher.DM_TOUCHSCREEN")
+        fm.values["DM_TOUCHSCREEN"] = "1"; fm.reset()
+        expect(fm.values["DM_TOUCHSCREEN"] == "0" && fm.values["DM_MOD_TOUCHUI"] == "0", "Reset shows both at their defaults")
         // DM_LAUNCHER=0 skips the screen, not the saved choices; DM_SAVED_CHOICES=0 ignores them and leaves them stored
         let fps = file.settings.first { $0.env == "DM_FPS_TARGET" }!
         d.set("30", forKey: "launcher.DM_FPS_TARGET"); unsetenv("DM_FPS_TARGET")

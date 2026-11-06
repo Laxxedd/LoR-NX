@@ -1,7 +1,7 @@
 // Mod "re-extraction": qzwxecrv's Re-Extraction (Steam Workshop 2748648361), as host callbacks on observation gates.
 // The PC mod is one Harmony prefix on LevelUpUI.OnClickHide: with Ctrl held, a click on the pick UI's Hide button re-rolls the emotion coins of every alive player unit and calls
-//   StageController.Instance.GetCurrentStageFloorModel().StartPickEmotionCard() again, so the Abnormality Pages offered are drawn anew. Here the key is R3, the mods' special button (mods/README.md):
-//   update_pre  LevelUpUI.Update entry (x0 = the LevelUpUI, once a frame while the UI is active): on a new press of R3 (dm_cheats_keys, every input source: physical controller, touch pad, keyboard)
+//   StageController.Instance.GetCurrentStageFloorModel().StartPickEmotionCard() again, so the Abnormality Pages offered are drawn anew. Here the key is the mods' special button (mods/README.md): R3, or Alt in Touchscreen Mode:
+//   update_pre  LevelUpUI.Update entry (x0 = the LevelUpUI, once a frame while the UI is active): on a new press of R3 or Alt (dm_mod_keys / dm_mod_special, every input source: physical controller, touch pad, keyboard, Touchscreen Mode's Alt key)
 //               while the Abnormality Page pick is showing and nothing is picked yet, re-roll and start the pick again
 //   pick_pre    StageLibraryFloorModel.StartPickEmotionCard entry (x0 = the floor model): remembered, to start the pick again from update_pre
 // Before the pick starts again, the pick screen's background loop (LevelUpUI._loopSound) is released and cleared: the game only releases it on a pick or on hiding, so a re-roll used to leave the old loop playing for about a minute.
@@ -35,7 +35,7 @@ void dm_mod_gate_run(uint64_t *regs, int param, void (*fn)(uint64_t *, int));
 
 static uint8_t *s_main;
 static void *s_floor;        // the StageLibraryFloorModel of the last StartPickEmotionCard
-static int s_r3_down;        // R3 as the last update_pre saw it
+static int s_r3_down;        // the special button (R3, or Alt in Touchscreen Mode) as the last update_pre saw it
 static uint64_t s_rng;
 static int g_hits[2];
 static int first_hits(int which) { return g_hits[which]++ < 4; }
@@ -104,7 +104,7 @@ static void update_run(uint64_t *r, int param) {
     }
     int units = reroll_coins();
     FN(K_STAGELIBFLOOR_START_PICK_EMOTION_CARD, void, void *, const void *)(s_floor, NULL);
-    if (first_hits(0)) LOG("[mod re-extraction] R3: coins of %d unit(s) re-rolled, pick %#llx started again", units, (unsigned long long)(uintptr_t)s_floor);
+    if (first_hits(0)) LOG("[mod re-extraction] R3 / Alt: coins of %d unit(s) re-rolled, pick %#llx started again", units, (unsigned long long)(uintptr_t)s_floor);
 }
 
 // Read once, at the first gate hit: the launcher's choices are in the environment by then, but not yet when constructors run
@@ -118,10 +118,10 @@ static int mod_enabled(void) {
     return on;
 }
 
-// A frame's work is only the key read: the game's functions run (dm_mod_gate_run) on a new press of R3 alone
+// A frame's work is only the key read: the game's functions run (dm_mod_gate_run) on a new press of the special button alone
 static void on_update_pre(uint64_t *r, int p) {
     if (!mod_enabled()) return;
-    int down = (dm_cheats_keys() & DM_BTN_RS) != 0;
+    int down = (dm_mod_keys() & dm_mod_special()) != 0;
     int pressed = down && !s_r3_down;
     s_r3_down = down;
     if (pressed) dm_mod_gate_run(r, p, update_run);

@@ -1,12 +1,12 @@
 {
   "id": "re-extraction",
   "title": "Re-Extraction (Library of Ruina)",
-  "description": "Port of qzwxecrv's Re-Extraction (Workshop 2748648361) as host callbacks on observation gates: while the Abnormality Page pick is open, the special button R3 re-rolls the emotion coins of the player's units and starts the pick again. For Library of Ruina 1.0.3.",
+  "description": "Port of qzwxecrv's Re-Extraction (Workshop 2748648361) as host callbacks on observation gates: while the Abnormality Page pick is open, the special button R3 (or Alt in Touchscreen Mode) re-rolls the emotion coins of the player's units and starts the pick again. For Library of Ruina 1.0.3.",
   "launcher": {
     "env": "DM_MOD_REEXTRACTION",
     "category": "Quality of Life",
     "label": "Re-Extraction",
-    "note": "Gives you the ability to re-roll Abnormality Pages by pressing R3. Original mod by [qzwxecrv’s Steam Workshop](https://steamcommunity.com/workshop/filedetails/?id=2748648361)"
+    "note": "Gives you the ability to re-roll Abnormality Pages by pressing R3 or ALT. Original mod by [qzwxecrv’s Steam Workshop](https://steamcommunity.com/workshop/filedetails/?id=2748648361)"
   },
   "game": "Library of Ruina 1.0.3",
   "gates": [

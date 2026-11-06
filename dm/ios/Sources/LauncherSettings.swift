@@ -7,6 +7,8 @@ struct Setting: Decodable, Identifiable {
     let section: String?   // heading on the settings screen; absent in older bundles
     let category: String?  // a mod's group on the iPhone's mods page (LauncherModel.modCategories); absent: Miscellaneous
     let needs: String?     // "<VAR>=<value>": a sub-setting, drawn only while that setting has that value
+    let unless: String?    // "<VAR>=<value>": drawn but greyed out and unchangeable while that setting has that value
+    let forced: String?    // "<VAR>=<value>" (a mod's switch): turned on and greyed out while that setting has that value (touch-ui while Touchscreen Mode is on)
     let level: String?     // "basic": shown first (the Mac window's Basic settings); any other or none: Advanced settings. The iPhone keeps one list
     let base: Base?        // render scale: the 3D views' size at 1.0, docked and handheld, for the size in pixels (the Mac window)
     struct Base: Decodable { let docked, handheld: [Int] }
@@ -32,7 +34,7 @@ struct Setting: Decodable, Identifiable {
         default: return true
         }
     }
-    enum CodingKeys: String, CodingKey { case env, kind, label, note, def = "default", section, category, needs, level, base, options, min, max, step, on, off, format }
+    enum CodingKeys: String, CodingKey { case env, kind, label, note, def = "default", section, category, needs, unless, forced, level, base, options, min, max, step, on, off, format }
 }
 struct SettingsFile: Decodable { let settings: [Setting] }
 
@@ -41,7 +43,7 @@ final class LauncherModel: ObservableObject {
     let fixed: Set<String>      // set by an env file or by the launch environment: shown, not changed
     let fromLaunch: Set<String>   // of those, the ones the launch environment set (a front end's launch overrides, Xcode; DM_ENV_LAUNCH_KEYS from launcher.c or main.m)
     let ignoreSaved: Bool   // DM_SAVED_CHOICES=0: start from the defaults, and leave the saved choices as they are
-    @Published var values: [String: String] = [:]
+    @Published var values: [String: String] = [:] { didSet { enforce() } }   // a switch a setting forces on (Setting.forced) follows that setting at once, whichever row changed
 
     private let defaults: UserDefaults
 
@@ -58,6 +60,7 @@ final class LauncherModel: ObservableObject {
             let saved = ignoreSaved ? nil : defaults.object(forKey: "launcher." + s.env) as? String   // a string, as launcher.c reads it: not string(forKey:), which turns a number into one
             values[s.env] = saved.flatMap { s.accepts($0) ? $0 : nil } ?? s.def   // a saved choice the game no longer offers: its default
         }
+        enforce()   // the observer does not run inside init
     }
 
     var sections: [String] {
@@ -71,6 +74,29 @@ final class LauncherModel: ObservableObject {
         let key = String(n[n.startIndex..<eq]), want = String(n[n.index(after: eq)...])
         guard let v = values[key] else { return true }
         return v == want
+    }
+    // A row with "unless" stays on the screen, greyed out, while the setting it names has that value (the controller options while Touchscreen Mode is on)
+    func greyedOut(_ s: Setting) -> Bool {
+        if isForced(s) { return true }
+        guard let n = s.unless, let eq = n.firstIndex(of: "=") else { return false }
+        let key = String(n[n.startIndex..<eq]), want = String(n[n.index(after: eq)...])
+        guard let v = values[key] else { return false }
+        return v == want
+    }
+    // A row with "forced" is switched on, and kept greyed out, while the setting it names has that value (the touch-ui mod while Touchscreen Mode is on): turning that setting off frees the switch, which stays on until the player turns it off.
+    // A row naming a setting this game does not have is never forced. A switch an env file or the launch environment sets is left as it is
+    func isForced(_ s: Setting) -> Bool { guard let n = s.forced else { return false }; return holds(n) }
+    func forcedBy(_ s: Setting) -> String? {   // the label of the setting that forces the row now, for its note
+        guard isForced(s), let n = s.forced, let eq = n.firstIndex(of: "=") else { return nil }
+        let key = String(n[n.startIndex..<eq])
+        return settings.first { $0.env == key }?.label
+    }
+    private func holds(_ n: String) -> Bool {
+        guard let eq = n.firstIndex(of: "=") else { return false }
+        return values[String(n[n.startIndex..<eq])] == String(n[n.index(after: eq)...])
+    }
+    private func enforce() {
+        for s in settings where isForced(s) && !fixed.contains(s.env) && values[s.env] != s.onValue { values[s.env] = s.onValue }
     }
     func rows(in section: String) -> [Setting] { settings.filter { $0.sectionTitle == section && visible($0) } }
 
@@ -111,7 +137,9 @@ final class LauncherModel: ObservableObject {
     // Reset every launcher choice to the game's defaults on the screen; values fixed by an env file or at launch stay. The saved choices are forgotten when Play applies
     // the defaults (apply() keeps no default), so Quit after Reset keeps them, and a choice a launch override hides is kept
     func reset() {
-        for s in settings where !fixed.contains(s.env) { values[s.env] = s.def }
+        var v = values
+        for s in settings where !fixed.contains(s.env) { v[s.env] = s.def }
+        values = v   // one change, so a forced switch sees the final state of the setting that forces it
         fputs("launcher: settings reset to the game's defaults\n", stderr)
     }
 

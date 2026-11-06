@@ -102,8 +102,9 @@ class LauncherSettingsTests(unittest.TestCase):
     def test_meta_is_strict(self):
         self.assertEqual(settings.meta('level=basic; needs=DM_RUMBLE=1', 1), {'level': 'basic', 'needs': 'DM_RUMBLE=1'})
         self.assertEqual(settings.meta('', 1), {})
+        self.assertEqual(settings.meta('unless=DM_TOUCHSCREEN=1', 1), {'unless': 'DM_TOUCHSCREEN=1'})
         for bad, why in [('colour=red', 'unknown meta key'), ('level', 'unknown meta key'), ('level=basic;level=basic', 'twice'),
-                         ('level=advanced', 'does not match'), ('needs=DM_RUMBLE', 'does not match'), ('needs=rumble=1', 'does not match')]:
+                         ('level=advanced', 'does not match'), ('needs=DM_RUMBLE', 'does not match'), ('needs=rumble=1', 'does not match'), ('unless=rumble=1', 'does not match')]:
             with self.subTest(bad=bad), self.assertRaises(SystemExit) as e:
                 settings.meta(bad, 1)
             self.assertIn(why, str(e.exception))
@@ -119,6 +120,22 @@ class LauncherSettingsTests(unittest.TestCase):
                 self.assertNotIn(key, schema['$defs']['setting']['required'], 'a meta field is optional')
                 self.assertRegex(docs, rf'- `{key}` \(optional\)')
         self.assertEqual(schema['properties']['schema']['const'], settings.SCHEMA)
+
+    def test_a_mod_switch_can_be_forced_by_a_setting(self):
+        """mod.json launcher "forced" (touch-ui while Touchscreen Mode is on) reaches the app's list through settings.mod_rows, in the form the schema takes"""
+        mod = json.loads((ROOT / 'mods/touch-ui/mod.json').read_text(encoding='utf-8'))
+        self.assertEqual(mod['launcher']['forced'], 'DM_TOUCHSCREEN=1')
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / 'launcher_mods.json'
+            row = {'env': 'DM_MOD_TOUCHUI', 'kind': 'toggle', 'label': 'Touch UI', 'default': '0', 'on': '1', 'off': '0', 'forced': 'DM_TOUCHSCREEN=1'}
+            f.write_text(json.dumps({'settings': [row]}), encoding='utf-8')
+            self.assertEqual(settings.mod_rows(f, set())[0]['forced'], 'DM_TOUCHSCREEN=1')
+            f.write_text(json.dumps({'settings': [{**row, 'forced': 'touchscreen'}]}), encoding='utf-8')
+            with self.assertRaises(SystemExit): settings.mod_rows(f, set())
+            f.write_text(json.dumps({'settings': [{k: v for k, v in row.items() if k != 'forced'}]}), encoding='utf-8')
+            self.assertNotIn('forced', settings.mod_rows(f, set())[0])
+        schema = json.loads((ROOT / 'docs/launcher.schema.json').read_text(encoding='utf-8'))
+        self.assertRegex('DM_TOUCHSCREEN=1', schema['$defs']['setting']['properties']['forced']['pattern'])
 
     def test_written_lists_follow_the_schema(self):
         schema = json.loads((ROOT / 'docs/launcher.schema.json').read_text(encoding='utf-8'))
@@ -153,6 +170,8 @@ class LauncherSettingsTests(unittest.TestCase):
         for bad, why in [('DM_X\ttoggle\t-\t0\talways\tGame\tX\t\tlevel=basic\textra\n', 'columns'),
                          ('DM_X\ttoggle\t-\t0\talways\tGame\tX\t\tneeds=DM_NOPE=1\n', 'no row sets'),
                          ('DM_Y\ttoggle\t-\t0\talways\tGame\tY\t\tneeds=DM_X=on\n', 'never takes'),
+                         ('DM_X\ttoggle\t-\t0\talways\tGame\tX\t\tunless=DM_NOPE=1\n', 'no row sets'),
+                         ('DM_Y\ttoggle\t-\t0\talways\tGame\tY\t\tunless=DM_X=on\n', 'never takes'),
                          ('DM_X\ttoggle\t-\t0\talways\tX\n', 'columns'), ('DM_X\ttoggle\t-\t0\talways\tsecret\tX\n', 'section'),
                          ('DM_X\ttoggle\ton\t0\talways\tGame\tX\n', 'toggle values'), ('DM_X\ttoggle\t-\t2\talways\tGame\tX\n', 'defaults to 0 or 1')]:
             with self.subTest(why=why), tempfile.TemporaryDirectory() as tmp:
