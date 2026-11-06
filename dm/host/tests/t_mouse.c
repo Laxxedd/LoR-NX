@@ -41,9 +41,16 @@ static int touch_click_main(int end_mode) {
     // a finger dragging the touchpad holds a touch under the cursor, which follows it, and lets go without an End: the game clicks on every End, wherever the cursor is (DM_TRACKPAD_DRAG_END=1 gives the End back)
     mouse_fill(m, 1, 30); touch_fill_n(t, 1, 8000); touch_fill_n(t, 1, 8001);
     dm_mouse_drag(1);
-    check("a drag holds a touch at the cursor: Start", touch_fill_n(t, 1, 9000) == 1 && (memcpy(v, t + 0x18, 16), v[0] == 1 && v[2] == 740 && v[3] == 410));
-    dm_mouse_move(10, -10);
-    check("..it follows the cursor", touch_fill_n(t, 1, 10000) == 1 && (memcpy(v, t + 0x18, 16), v[0] == 0 && v[2] == 750 && v[3] == 400));
+    if (end_mode) {   // DM_TRACKPAD_DRAG_HIDE=0: the finger is on the cursor from the start
+        check("a drag holds a touch at the cursor: Start", touch_fill_n(t, 1, 9000) == 1 && (memcpy(v, t + 0x18, 16), v[0] == 1 && v[2] == 740 && v[3] == 410));
+        dm_mouse_move(10, -10);
+        check("..it follows the cursor", touch_fill_n(t, 1, 10000) == 1 && (memcpy(v, t + 0x18, 16), v[0] == 0 && v[2] == 750 && v[3] == 400));
+    } else {   // the finger comes down off the panel, so the game presses nothing, and slides onto the cursor
+        check("a drag's finger lands off the panel: Start at (-1, -1)", touch_fill_n(t, 1, 9000) == 1 && (memcpy(v, t + 0x18, 16), v[0] == 1 && v[2] == -1 && v[3] == -1));
+        dm_mouse_move(10, -10);
+        check("..the next read (the game's other reader) is off the panel too", touch_fill_n(t, 1, 9500) == 1 && (memcpy(v, t + 0x18, 16), v[0] == 0 && v[2] == -1 && v[3] == -1));
+        check("..then it follows the cursor", touch_fill_n(t, 1, 10000) == 1 && (memcpy(v, t + 0x18, 16), v[0] == 0 && v[2] == 750 && v[3] == 400));
+    }
     dm_mouse_move(5, 5); dm_mouse_drag(0);
     if (end_mode) {
         check("..lifting ends it where the cursor is", touch_fill_n(t, 1, 11000) == 1 && (memcpy(v, t + 0x18, 16), v[0] == 2 && v[2] == 755 && v[3] == 405));
@@ -55,7 +62,7 @@ static int touch_click_main(int end_mode) {
         check("a tap right after a drag still clicks: Start, then End", touch_fill_n(t, 1, 12103) == 1 && (memcpy(v, t + 0x18, 16), v[0] == 1 && v[2] == 755 && v[3] == 405) && touch_fill_n(t, 1, 12104) == 1 && (memcpy(v, t + 0x18, 16), v[0] == 2));
         touch_fill_n(t, 1, 12105);
         dm_mouse_drag(1); touch_fill_n(t, 1, 12200); dm_mouse_drag(0); dm_mouse_drag(1);
-        check("a drag that starts at once after another starts after the gap", (touch_fill_n(t, 1, 12201), touch_fill_n(t, 1, 12202), touch_fill_n(t, 1, 12203) == 0) && touch_fill_n(t, 1, 12204) == 1 && (memcpy(v, t + 0x18, 16), v[0] == 1));
+        check("a drag that starts at once after another starts after the gap, off the panel", (touch_fill_n(t, 1, 12201), touch_fill_n(t, 1, 12202), touch_fill_n(t, 1, 12203) == 0) && touch_fill_n(t, 1, 12204) == 1 && (memcpy(v, t + 0x18, 16), v[0] == 1 && v[2] == -1));
         dm_mouse_drag(0); touch_fill_n(t, 1, 12300); touch_fill_n(t, 1, 12301); touch_fill_n(t, 1, 12302);
         dm_mouse_drag(1); dm_mouse_drag(0);
         check("a drag lifted before the game read it leaves nothing", touch_fill_n(t, 1, 12400) == 0);
@@ -69,7 +76,7 @@ static int touch_click_main(int end_mode) {
 int main(int argc, char **argv) {
     setenv("DM_TOUCHSCREEN", "1", 1);
     if (argc > 1 && !strcmp(argv[1], "touch")) return touch_click_main(0);   // DM_TRACKPAD_TOUCH unset: the default
-    if (argc > 1 && !strcmp(argv[1], "touch-end")) { setenv("DM_TRACKPAD_DRAG_END", "1", 1); return touch_click_main(1); }
+    if (argc > 1 && !strcmp(argv[1], "touch-end")) { setenv("DM_TRACKPAD_DRAG_END", "1", 1); setenv("DM_TRACKPAD_DRAG_HIDE", "0", 1); return touch_click_main(1); }
     setenv("DM_TRACKPAD_TOUCH", "0", 1);   // the mouse-button checks below
     mouse_t m[3];
     check("mouse starts at the panel centre, connected, nothing pressed", mouse_fill(m, 1, 100) == 1 && same(&m[0], (mouse_t){100, 640, 360, 0, 0, 0, 0, 0, 3}));
