@@ -744,14 +744,26 @@ HLE_FORCE("_ZN2nn3hid15InitializeMouseEv", "mouse; not provided by the host", vo
 // Touchscreen Mode (DM_TOUCHSCREEN=1): the front end's touchpad is a connected mouse and its Shift / Ctrl / Alt keys a connected keyboard's modifiers (hle_touch.c mouse_fill / keyboard_fill)
 int mouse_fill(void *out, int n, int64_t top);
 int keyboard_fill(void *out, int n, int64_t top);
+// DM_MOUSE_LOG=1 (diagnostic): says which mouse call the game makes (first call of each) and logs each change of the cursor or the buttons it was handed, up to 300 lines: whether the game reads the touchpad as a mouse at all
+static void mouse_note(const char *fn, const void *st) {
+    static int on = -1, nl, seen[2]; static int32_t lx = -1, ly = -1; static uint32_t lb = ~0u;
+    if (on < 0) { const char *e = getenv("DM_MOUSE_LOG"); on = e && atoi(e); }
+    if (!on) return;
+    int k = fn[0] == 's'; if (!seen[k]) { seen[k] = 1; LOG("[mouse] the game calls GetMouseState%s", k ? "" : "s"); }
+    int32_t x, y; uint32_t b, at; memcpy(&x, (const uint8_t *)st + 8, 4); memcpy(&y, (const uint8_t *)st + 12, 4); memcpy(&b, (const uint8_t *)st + 0x20, 4); memcpy(&at, (const uint8_t *)st + 0x24, 4);
+    if (nl < 300 && (x != lx || y != ly || b != lb)) { LOG("[mouse] %s: cursor (%d,%d) buttons %#x attributes %#x", k ? "state" : "states", x, y, b, at); if (++nl == 300) LOG("[mouse] DM_MOUSE_LOG reached 300 lines, logging stopped"); }
+    lx = x; ly = y; lb = b;
+}
 HLE_FORCE("_ZN2nn3hid14GetMouseStatesEPNS0_10MouseStateEi", "mouse states: the touchpad in Touchscreen Mode, otherwise 0 entries", int, h_hid_MouseStates, void *out, int n) {
     if (n <= 0) return 0;
-    return mouse_fill(out, n, atomic_fetch_add(&g_sampling, 1) + 1);
+    int r = mouse_fill(out, n, atomic_fetch_add(&g_sampling, 1) + 1);
+    if (r) mouse_note("states", out);
+    return r;
 }
 // Single state (13 Sentinels calls it every frame; without the hook the sdk aborts on its uninitialized mouse resource): MouseState is 0x28 bytes {sampling number i64, x, y, dx, dy, wheel dx, dy, buttons, attributes}; attributes 0 = not connected
 HLE_FORCE("_ZN2nn3hid13GetMouseStateEPNS0_10MouseStateE", "mouse state: the touchpad in Touchscreen Mode, otherwise not connected (MouseState 0x28 bytes zeroed)", void, h_hid_MouseState, void *s) {
     int64_t top = atomic_fetch_add(&g_sampling, 1) + 1;
-    if (mouse_fill(s, 1, top)) return;
+    if (mouse_fill(s, 1, top)) { mouse_note("state", s); return; }
     memset(s, 0, 0x28); ((int64_t *)s)[0] = top;
 }
 HLE_FORCE("_ZN2nn3hid18InitializeKeyboardEv", "keyboard; not provided by the host", void, h_hid_InitKbd, void) {}

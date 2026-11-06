@@ -11,14 +11,11 @@
 #include <math.h>
 #include <pthread.h>
 #include <stdatomic.h>
-enum { F_EMPTY, F_DOWN, F_LIFTED, F_GONE };   // F_GONE: lifted without an End (a touchpad drag, touch_drop); it is simply absent from the next reads
-#define GONE_READS 3   // reads a dropped finger stays absent before its id can press again, so that the game's own read and Unity's poll (two readers per frame) both see the finger gone
-static struct { int st, reported, again, gone, hide, ahide; float x, y, ax, ay; } g_f[16];   // again/ax/ay: the same id was pressed again before End went out (the next read reports End first, then the new Start); gone: reads since the drop; hide / ahide: reads still to report off the panel (a touchpad drag's first reads, see trackpad_hide), for the finger / for its pending re-press
+enum { F_EMPTY, F_DOWN, F_LIFTED };
+static struct { int st, reported, again; float x, y, ax, ay; } g_f[16];   // again/ax/ay: the same id was pressed again before End went out (the next read reports End first, then the new Start)
 static struct { int down, pend; float x, y; } g_gf[16];   // the gesture recognizer's own view of the fingers; pend: pressed since its last sample (a press and lift between two samples still counts once)
 static pthread_mutex_t g_tl = PTHREAD_MUTEX_INITIALIZER;
 static int64_t g_tsamp; static uint64_t g_tlast_ns;
-#define HIDE_READS 2   // the first reads of a touchpad drag's finger that sit off the panel: the game's two readers each see it once
-static int g_hide_next;   // set by dm_mouse_drag around the push that starts a drag's finger: that finger's first reads are off the panel
 
 static void touch_apply(const dm_touch *t, int n) {
     pthread_mutex_lock(&g_tl);
@@ -28,9 +25,8 @@ static void touch_apply(const dm_touch *t, int n) {
         seen[id] = 1;
         if (!g_gf[id].down) g_gf[id].pend = 1;
         g_gf[id].down = 1; g_gf[id].x = t[i].x; g_gf[id].y = t[i].y;
-        if (g_f[id].st == F_GONE) { g_f[id].again = 1; g_f[id].ax = t[i].x; g_f[id].ay = t[i].y; g_f[id].ahide = g_hide_next ? HIDE_READS : 0; continue; }   // pressed again while the drop is still settling: it starts once the finger has been absent for GONE_READS reads
-        if (g_f[id].st == F_LIFTED && g_f[id].reported) { g_f[id].again = 1; g_f[id].ax = t[i].x; g_f[id].ay = t[i].y; g_f[id].ahide = g_hide_next ? HIDE_READS : 0; continue; }
-        if (g_f[id].st == F_EMPTY) { g_f[id].st = F_DOWN; g_f[id].reported = 0; g_f[id].hide = g_hide_next ? HIDE_READS : 0; }
+        if (g_f[id].st == F_LIFTED && g_f[id].reported) { g_f[id].again = 1; g_f[id].ax = t[i].x; g_f[id].ay = t[i].y; continue; }
+        if (g_f[id].st == F_EMPTY) { g_f[id].st = F_DOWN; g_f[id].reported = 0; }
         else if (g_f[id].st == F_LIFTED) g_f[id].st = F_DOWN;              // Pressed again before the lift was reported: treat it as held down all along
         g_f[id].x = t[i].x; g_f[id].y = t[i].y;
     }
@@ -49,17 +45,6 @@ void dm_touch_set(const dm_touch *t, int n) {
     void (*o)(const dm_touch *, int) = atomic_load_explicit(&dm_touch_observer, memory_order_relaxed); if (o) o(t, n);
 }
 void dm_touch_script(const dm_touch *t, int n) { touch_apply(t, n); }
-// Lets finger `id` go without an End (the touchpad's drag, dm_mouse_drag): for the game the finger just vanishes. A finger that went up with an End (every tap) is a click wherever it is lifted, and
-// the game cannot tell a drag's lift from a tap's: it clicked whatever the cursor had come to rest on. Call it right after dm_touch_set took the finger out. A finger whose Start was never read is simply forgotten.
-static void touch_drop(int id) {
-    pthread_mutex_lock(&g_tl);
-    if (g_f[id].st == F_DOWN || g_f[id].st == F_LIFTED) {
-        if (!g_f[id].reported) g_f[id].st = F_EMPTY;
-        else { g_f[id].st = F_GONE; g_f[id].gone = 0; }
-        g_f[id].again = 0;
-    }
-    pthread_mutex_unlock(&g_tl);
-}
 
 static int32_t clampi(float v, int hi) { int32_t r = (int32_t)(v * (float)(hi + 1)); return r < 0 ? 0 : r > hi ? hi : r; }
 // Fill one TouchScreenState<max> (out is 0x10 + 0x28 · max bytes; max 1–16); now_ns is used for delta_time. Returns the number of touch points written.
@@ -72,22 +57,15 @@ int touch_fill_n(void *out, int max, uint64_t now_ns) {
     int k = 0;
     for (int id = 0; id < 16 && k < max; id++) {
         if (g_f[id].st == F_EMPTY) continue;
-        if (g_f[id].st == F_GONE) {   // absent from this read
-            if (++g_f[id].gone < GONE_READS) continue;
-            if (g_f[id].again) { g_f[id].st = F_DOWN; g_f[id].reported = 0; g_f[id].again = 0; g_f[id].x = g_f[id].ax; g_f[id].y = g_f[id].ay; g_f[id].hide = g_f[id].ahide; }   // the re-press starts on the next read
-            else g_f[id].st = F_EMPTY;
-            continue;
-        }
         uint32_t attr = 0;
         if (!g_f[id].reported) { attr |= 1; g_f[id].reported = 1; }          // Start (reported for the first time this time)
         else if (g_f[id].st == F_LIFTED) attr |= 2;                         // End (Start already reported, already lifted)
         uint8_t *s = o + 0x10 + 0x28 * k++;
         int32_t x = clampi(g_f[id].x, 1279), y = clampi(g_f[id].y, 719), d = 30, zero = 0, fid = id;
-        if (g_f[id].hide > 0) { g_f[id].hide--; x = y = -1; }   // a touchpad drag's finger lands off the panel (trackpad_hide)
         memcpy(s + 0x00, &dt, 8); memcpy(s + 0x08, &attr, 4); memcpy(s + 0x0c, &fid, 4);
         memcpy(s + 0x10, &x, 4); memcpy(s + 0x14, &y, 4); memcpy(s + 0x18, &d, 4); memcpy(s + 0x1c, &d, 4); memcpy(s + 0x20, &zero, 4);
         if (attr & 2) {                                                      // End has been reported: release; if the same id was pressed again in the meantime, turn it into a new press
-            if (g_f[id].again) { g_f[id].st = F_DOWN; g_f[id].reported = 0; g_f[id].again = 0; g_f[id].x = g_f[id].ax; g_f[id].y = g_f[id].ay; g_f[id].hide = g_f[id].ahide; }
+            if (g_f[id].again) { g_f[id].st = F_DOWN; g_f[id].reported = 0; g_f[id].again = 0; g_f[id].x = g_f[id].ax; g_f[id].y = g_f[id].ay; }
             else g_f[id].st = F_EMPTY;
         }
     }
@@ -217,48 +195,25 @@ static uint32_t g_mheld, g_mlatch, g_mprev;                          // mouse bu
 static uint32_t g_kheld, g_klatch, g_kprev;                          // keyboard modifiers, the same way
 
 static int trackpad_on(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_TOUCHSCREEN"); v = e && atoi(e); } return v; }
-// Whether the left click reaches the game as a touch-screen press at the cursor instead of a mouse button. On by default: Touchscreen Mode comes with the touch-ui mod (the launcher forces it on), which points the
-// game's Input.touchCount / GetTouch at the touch screen, so the touch screen is the only pointer input the game reads. With the touchpad producing mouse events alone, the touch screen stayed empty for ever and every
-// tap did nothing. DM_TRACKPAD_TOUCH=0 gives the plain mouse button back (for a game that reads the mouse).
-static int trackpad_touch(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_TRACKPAD_TOUCH"); v = e ? atoi(e) != 0 : 1; } return v; }
+// The touchpad is a plain virtual mouse: dm_mouse_move moves the cursor, dm_mouse_button presses its buttons, dm_mouse_wheel its wheel, and the game reads them as a connected mouse (mouse_fill below).
+// DM_TRACKPAD_TOUCH=1 is the one fallback, for a game that reads the touch screen and not the mouse (before a mod makes it read the mouse): the left button is then also a short touch-screen press at the cursor
+// (finger 0, down while the button is). Nothing follows a finger drag then: the cursor moves on the mouse alone.
+static int trackpad_touch(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_TRACKPAD_TOUCH"); v = e && atoi(e) != 0; } return v; }
 static void trackpad_touch_push(int down) {   // the left button as finger 0 at the cursor (called with g_ml held)
     // the middle of the pixel the mouse reports ((int)g_mx, (int)g_my): a coordinate that sits exactly on a pixel (410 / 720) comes out a hair below it as a float and would land one pixel short after clampi's truncation
     dm_touch t = {0, (floorf(g_mx) + 0.5f) / PANEL_W, (floorf(g_my) + 0.5f) / PANEL_H};
     dm_touch_set(&t, down ? 1 : 0);
 }
-// Dragging a finger on the touchpad holds a touch under the cursor (dm_mouse_drag): the game learns the pointer's position only from touches (its cursor stayed where the last click left it and jumped to the new
-// place on the next one), so the touch has to follow the finger. Dragging also drags what is under the cursor (a scroll list, a slider); letting go ends the touch without a click on anything the cursor moved onto.
-// DM_TRACKPAD_DRAG=0 turns it off (the cursor then moves on the mouse alone). Only with the click as a touch (trackpad_touch)
-static int trackpad_drag(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_TRACKPAD_DRAG"); v = trackpad_touch() && (e ? atoi(e) != 0 : 1); } return v; }
-// DM_TRACKPAD_DRAG_END=1 ends a drag's touch with a normal End, like a tap's (the old behaviour: the game clicks wherever the cursor stopped). By default the touch is dropped without an End (touch_drop)
-static int trackpad_drag_end(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_TRACKPAD_DRAG_END"); v = e && atoi(e) != 0; } return v; }
-// Where a drag's finger lands decides what the game takes the drag for: its UI presses whatever is under the finger when it comes down and clicks that if the finger lifts over the same thing, so a drag that began on a button
-// and ended on it (however far it wandered in between) was a click. The drag's finger therefore comes down off the panel (-1, -1: nothing there to press) and its first HIDE_READS reads stay there; from the next read it is on the cursor,
-// as a finger that slid in, which presses nothing. The cost is the game's cursor sitting off the panel for a frame at the start of each drag. DM_TRACKPAD_DRAG_HIDE=0 puts the finger on the cursor from the start.
-static int trackpad_hide(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_TRACKPAD_DRAG_HIDE"); v = e ? atoi(e) != 0 : 1; } return v; }
-static int g_mdrag;   // a finger is dragging the cursor (the touch is held)
-static int touch_wanted(void) { return (g_mheld & DM_MOUSE_LEFT) || g_mdrag; }
-static int touch_wanted_left(void) { return (g_mheld & DM_MOUSE_LEFT) != 0; }   // a left click already holds the finger
 void dm_mouse_move(float dx, float dy) {
     pthread_mutex_lock(&g_ml);
     float nx = fminf(fmaxf(g_mx + dx, 0), PANEL_W - 1), ny = fminf(fmaxf(g_my + dy, 0), PANEL_H - 1);
     g_mdx += nx - g_mx; g_mdy += ny - g_my; g_mx = nx; g_my = ny;
-    if (trackpad_touch() && touch_wanted()) trackpad_touch_push(1);
     pthread_mutex_unlock(&g_ml);
 }
 void dm_mouse_button(uint32_t mask, int down) {
     pthread_mutex_lock(&g_ml);
     if (down) { g_mheld |= mask; g_mlatch |= mask; } else g_mheld &= ~mask;
-    if (trackpad_touch() && (mask & DM_MOUSE_LEFT)) trackpad_touch_push(touch_wanted());
-    pthread_mutex_unlock(&g_ml);
-}
-void dm_mouse_drag(int down) {
-    if (!trackpad_drag()) return;
-    pthread_mutex_lock(&g_ml);
-    if ((down != 0) != g_mdrag) {
-        g_mdrag = down != 0; g_hide_next = down && !touch_wanted_left() && trackpad_hide(); trackpad_touch_push(touch_wanted()); g_hide_next = 0;
-        if (!down && !touch_wanted() && !trackpad_drag_end()) touch_drop(0);   // the lift of a drag is not a click
-    }
+    if (trackpad_touch() && (mask & DM_MOUSE_LEFT)) trackpad_touch_push((g_mheld & DM_MOUSE_LEFT) != 0);
     pthread_mutex_unlock(&g_ml);
 }
 void dm_mouse_wheel(int notches) { pthread_mutex_lock(&g_ml); g_mwy += notches; pthread_mutex_unlock(&g_ml); }

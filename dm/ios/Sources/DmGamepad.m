@@ -476,7 +476,7 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
             _padStart = _padLast = [t locationInView:self]; _padMoved = _padDead = _padRight = NO;
             [self padCancelHold]; _padTimer = [NSTimer scheduledTimerWithTimeInterval:K_TP_HOLD target:self selector:@selector(padHold:) userInfo:nil repeats:NO];
         } else {   // the second finger: no click or hold any more, a wheel instead
-            [self padCancelHold]; dm_mouse_drag(0);
+            [self padCancelHold];
             if (_padRight) { dm_mouse_button(DM_MOUSE_RIGHT, 0); _padRight = NO; }
             _padDead = YES; _padScroll = 0; _padScrollY = [self padMidY];
         }
@@ -488,7 +488,6 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
         if (!_padMoved) {
             if (hypot(p.x - _padStart.x, p.y - _padStart.y) <= K_TP_SLOP) return;
             _padMoved = YES; [self padCancelHold];
-            if (!_padRight) dm_mouse_drag(1);   // the game's cursor follows only a touch: hold one under the cursor while the finger drags
         }
         CGFloat k = 1280.0 / [self picture].size.width * K_TP_GAIN * touchpad_speed();
         dm_mouse_move((p.x - _padLast.x) * k, (p.y - _padLast.y) * k); _padLast = p;
@@ -506,7 +505,7 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
         for (int k = 0; k < 3; k++) if (_kbTouch[k] == t) { _kbTouch[k] = nil; dm_key_modifier(k_kbMask[k], 0); [self refreshKeys]; }
         if (![_pad containsObject:t]) continue;
         if (_pad.count == 1) {   // the last finger lifts
-            [self padCancelHold]; dm_mouse_drag(0);
+            [self padCancelHold];
             if (_padRight) { dm_mouse_button(DM_MOUSE_RIGHT, 0); _padRight = NO; }
             else if (!_padMoved && !_padDead && !cancelled) [self padClick];
             _padDead = NO;
@@ -515,7 +514,7 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
     }
 }
 - (void)tsReset {   // lets go of everything the touchpad and the keys hold
-    [self padCancelHold]; dm_mouse_drag(0);
+    [self padCancelHold];
     for (int k = 0; k < 3; k++) if (_kbTouch[k]) { _kbTouch[k] = nil; dm_key_modifier(k_kbMask[k], 0); }
     if (_padRight) { _padRight = NO; dm_mouse_button(DM_MOUSE_RIGHT, 0); }
     if (touchscreen_mode()) { _lmbEpoch++; dm_mouse_button(DM_MOUSE_LEFT, 0); }
