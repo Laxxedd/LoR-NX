@@ -270,11 +270,6 @@ jobs:
       - name: Apply mods
         run: python3 scripts/apply_mods.py --out "$HOME/mods"
 
-      - name: repair exec
-        run: |
-          chmod +x dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate
-          xattr -dr com.apple.quarantine dm/gfx/tools/dmsh_xlate_bin || true
-
       - name: Build IPA
         env:
           APP_NAME: ${{ inputs.app_name }}
