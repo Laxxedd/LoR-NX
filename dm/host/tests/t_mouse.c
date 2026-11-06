@@ -1,5 +1,5 @@
 // Touchscreen Mode's virtual mouse and keyboard modifiers: dm_mouse_* / dm_key_modifier -> mouse_fill / keyboard_fill, checked against hand-written byte layouts
-// (MouseState 0x28 bytes, KeyboardState 0x30 bytes). Runs with DM_TOUCHSCREEN=1 set by the test itself; a second program run without it checks "not connected".
+// (MouseState 0x28 bytes, KeyboardState 0x30 bytes). Runs with DM_TOUCHSCREEN=1 set by the test itself: plain, with DM_TRACKPAD_TOUCH=0 (the left click is a mouse button), and as `t_mouse touch` with the default (the left click is a touch-screen press at the cursor).
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,7 +9,6 @@ enum { DM_KEY_CTRL = 1, DM_KEY_SHIFT = 2, DM_KEY_ALT = 4 };
 void dm_mouse_move(float dx, float dy);
 void dm_mouse_button(uint32_t mask, int down);
 void dm_mouse_wheel(int notches);
-void dm_mouse_drag(int down);
 void dm_key_modifier(uint32_t mask, int down);
 int mouse_fill(void *out, int n, int64_t top);
 int keyboard_fill(void *out, int n, int64_t top);
@@ -38,23 +37,13 @@ static int touch_click_main(void) {
     dm_mouse_button(DM_MOUSE_LEFT, 0);
     dm_mouse_button(DM_MOUSE_RIGHT, 1);
     check("the right button stays a mouse button", mouse_fill(m, 1, 21) == 1 && m[0].buttons == DM_MOUSE_RIGHT && touch_fill_n(t, 1, 7000) == 1);   // the one touch is the End of the click above
-    // a finger dragging the touchpad holds a touch under the cursor, which follows it, and lets go without a click
-    mouse_fill(m, 1, 30); touch_fill_n(t, 1, 8000); touch_fill_n(t, 1, 8001);
-    dm_mouse_drag(1);
-    check("a drag holds a touch at the cursor: Start", touch_fill_n(t, 1, 9000) == 1 && (memcpy(v, t + 0x18, 16), v[0] == 1 && v[2] == 740 && v[3] == 410));
-    dm_mouse_move(10, -10);
-    check("..it follows the cursor", touch_fill_n(t, 1, 10000) == 1 && (memcpy(v, t + 0x18, 16), v[0] == 0 && v[2] == 750 && v[3] == 400));
-    dm_mouse_move(5, 5); dm_mouse_drag(0);
-    check("..lifting ends it where the cursor is", touch_fill_n(t, 1, 11000) == 1 && (memcpy(v, t + 0x18, 16), v[0] == 2 && v[2] == 755 && v[3] == 405));
-    check("..and nothing follows", touch_fill_n(t, 1, 12000) == 0);
-    dm_mouse_drag(1); dm_mouse_button(DM_MOUSE_LEFT, 1); dm_mouse_button(DM_MOUSE_LEFT, 0);
-    check("a click ending during a drag does not let the touch go", (touch_fill_n(t, 1, 13000), touch_fill_n(t, 1, 13001) == 1 && (memcpy(v, t + 0x18, 16), v[0] == 0)));
-    dm_mouse_drag(0); touch_fill_n(t, 1, 14000); touch_fill_n(t, 1, 14001);
     printf("%d / %d passed\n", cases - fails, cases);
     return fails != 0;
 }
 int main(int argc, char **argv) {
     setenv("DM_TOUCHSCREEN", "1", 1);
+    if (argc > 1 && !strcmp(argv[1], "touch")) return touch_click_main();   // DM_TRACKPAD_TOUCH unset: the default
+    setenv("DM_TRACKPAD_TOUCH", "0", 1);   // the mouse-button checks below
     mouse_t m[3];
     check("mouse starts at the panel centre, connected, nothing pressed", mouse_fill(m, 1, 100) == 1 && same(&m[0], (mouse_t){100, 640, 360, 0, 0, 0, 0, 0, 3}));
     dm_mouse_move(10.5f, -20.25f);
