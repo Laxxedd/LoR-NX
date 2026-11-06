@@ -18,4 +18,12 @@
 1BC955C 1F2003D5
 // UIControlManager.Update: "bl SelectSelectableForcely" -> nop (the controller selection that goes with it)
 1BC9564 1F2003D5
+// Input.touchCount / Input.touchSupported / Input.GetTouch (bridges 0x847870, 0x847890, 0x8478b0): they read the input singleton (global cell 288),
+// which the factory (0x8476a0..0x847718, "csel x8, x19, x8, eq") sets to the 56-byte Input System side object whenever it exists (activeInputHandler 1 or 2).
+// That object's touch slots (vtable 0x516be88 slots 3 and 5, 0x847a54 / 0x847a60) are "mov x0, xzr; ret", so touchCount is always 0.
+// The legacy touch provider (0x8f0 bytes, vtable 0x516bd78, getter 0x842fb8 returning [obj+2272]) is in global cell 280 and is polled normally.
+// "ldr x8, [x8, #288]" -> "ldr x8, [x8, #280]" (and the same for x21 in GetTouch), so the three bridges use the legacy provider.
+847874 088D40F9
+847894 088D40F9
+8478C8 B58E40F9
 @stop

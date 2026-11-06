@@ -1,7 +1,7 @@
 {
   "id": "touch-ui",
   "title": "Touch UI",
-  "description": "Disables controller mode",
+  "description": "Disables controller mode and routes Input.touchCount / GetTouch to the legacy touch provider",
   "launcher": {
     "env": "DM_MOD_TOUCHUI",
     "category": "Quality of Life",
@@ -23,7 +23,10 @@
       "0x1bc955c": "39002109",
       "0x1bc9564": "940000cb",
       "0x1bca514": "2a0103f4",
-      "0x1bca51c": "12000035"
+      "0x1bca51c": "12000035",
+      "0x847874": "f9409108",
+      "0x847894": "f9409108",
+      "0x8478c8": "f94092b5"
     }
   },
   "obs": {
