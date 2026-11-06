@@ -1808,6 +1808,8 @@ static const int *present_crop(const int win[4], int tw, int th, int lc[4]) {
     }
     return lc;
 }
+static _Atomic uint32_t g_present_wh;
+void dm_nvn_window_size(int *w, int *h) { uint32_t v = atomic_load_explicit(&g_present_wh, memory_order_relaxed); *w = (int)(v & 0xffff); *h = (int)(v >> 16); }
 NVN(nvnQueuePresentTexture, void, NVNqueue *q, NVNwindow *w, int idx) {
     (void)q; win_t *o = (win_t *)w; o->presents++;
     dm_fps_lock_tick(); dm_ue_cvar_tick();
@@ -1838,6 +1840,7 @@ NVN(nvnQueuePresentTexture, void, NVNqueue *q, NVNwindow *w, int idx) {
     uint64_t t0 = now_ns();
     if (idx >= 0 && idx < o->ntex && idx < 4) {   // enqueue only, return immediately
         const tex_t *t = CTX(o->tex[idx]); int lc[4]; const int *crop = present_crop(o->crop, (int)t->d.width, (int)t->d.height, lc);
+        atomic_store_explicit(&g_present_wh, ((uint32_t)t->d.width & 0xffff) | ((uint32_t)t->d.height << 16), memory_order_relaxed);
         nvn_cap_present(t, crop);   // DM_NVN_CAPTURE (nvn_capture.inc)
         o->ticket[idx] = mtl_present(t, present_period(o) / 1e9, crop);
     }

@@ -1,7 +1,7 @@
 {
   "id": "touch-ui",
   "title": "Touch UI",
-  "description": "Disables controller mode and routes Input.touchCount / GetTouch to the legacy touch provider",
+  "description": "Disables controller mode, routes Input.touchCount / GetTouch to the legacy touch provider and gives Input's mouse natives to Touchscreen Mode's touchpad",
   "launcher": {
     "env": "DM_MOD_TOUCHUI",
     "category": "Quality of Life",
@@ -11,11 +11,7 @@
   },
   "game": "Library of Ruina 1.0.3",
   "gates": [
-    "touch_count",
-    "getter",
-    "poll_end",
-    "icall",
-    "vcall"
+    "icall_resolved"
   ],
   "host": "host.c",
   "exefs": "exefs",
@@ -33,34 +29,10 @@
   "obs": {
     "aeea627ddbd1214764dfef5f965e94a2": [
       {
-        "gate": "touch_count",
-        "offset": "0x16f05e8",
-        "word": "7100001f",
-        "reason": "LOR_InputModule.ProcessTouchEvents tail (RVA 0x16f0450): cmp w0, #0 after the input.touchCount call, w0 = touchCount; runs every frame the module processes"
-      },
-      {
-        "gate": "getter",
-        "offset": "0x842fbc",
-        "word": "7100011f",
-        "reason": "native touch getter (0x842fb8): ldrb w8,[x0,#24]; cmp w8,#0 selects 0 or [x0+2272]; x0 = the object, w8 = the flag"
-      },
-      {
-        "gate": "poll_end",
-        "offset": "0x843728",
-        "word": "6d4223e9",
-        "reason": "epilogue of Unity's native touch poll (0x84304c), reached by every exit: x19 = this, after the touches were copied and [x19+2240] set"
-      },
-      {
-        "gate": "icall",
-        "offset": "0x3530e08",
+        "gate": "icall_resolved",
+        "offset": "0x391678",
         "word": "f9400bf3",
-        "reason": "UnityEngine.Input.get_touchCount (0x3530df0), before the tail call br x0: x0 = the cached native icall function"
-      },
-      {
-        "gate": "vcall",
-        "offset": "0x847884",
-        "word": "f9400d01",
-        "reason": "touchCount bridge (0x847870, the native behind Input.get_touchCount): x0 = the manager singleton, x8 = its vtable, before ldr x1,[x8,#24] that picks the method it tail-calls"
+        "reason": "il2cpp icall resolver (0x391660) success path, before ldr x19,[sp,#0x10]: x19 = the icall name, x0 = the resolved native; the host swaps x0 for its own mouse functions when the name is one of Input's mouse natives"
       }
     ]
   }

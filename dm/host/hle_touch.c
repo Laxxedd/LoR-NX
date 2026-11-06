@@ -8,6 +8,7 @@
 // +0x10 x, +0x14 y, +0x18 diameter x, +0x1c diameter y, +0x20 rotation angle, +0x24 reserved. TouchScreenState<16>: +0 sample number, +8 touch count, 16 TouchState from +0x10.
 #include "dm.h"
 #include "front.h"
+#include "dm_input.h"
 #include <math.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -193,6 +194,7 @@ static float g_mx = PANEL_W / 2, g_my = PANEL_H / 2, g_mdx, g_mdy;   // the curs
 static int g_mwy;                                                    // wheel notches not yet read
 static uint32_t g_mheld, g_mlatch, g_mprev;                          // mouse buttons: held now, pressed since the last read, reported by the last read
 static uint32_t g_kheld, g_klatch, g_kprev;                          // keyboard modifiers, the same way
+static uint32_t g_mflatch, g_mfprev; static int32_t g_mfwheel; static uint64_t g_mfframe; static int g_mfvalid; static dm_mouse_frame_t g_mfsnap;
 
 static int trackpad_on(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_TOUCHSCREEN"); v = e && atoi(e); } return v; }
 // The touchpad is a plain virtual mouse: dm_mouse_move moves the cursor, dm_mouse_button presses its buttons, dm_mouse_wheel its wheel, and the game reads them as a connected mouse (mouse_fill below).
@@ -212,11 +214,11 @@ void dm_mouse_move(float dx, float dy) {
 }
 void dm_mouse_button(uint32_t mask, int down) {
     pthread_mutex_lock(&g_ml);
-    if (down) { g_mheld |= mask; g_mlatch |= mask; } else g_mheld &= ~mask;
+    if (down) { g_mheld |= mask; g_mlatch |= mask; g_mflatch |= mask; } else g_mheld &= ~mask;
     if (trackpad_touch() && (mask & DM_MOUSE_LEFT)) trackpad_touch_push((g_mheld & DM_MOUSE_LEFT) != 0);
     pthread_mutex_unlock(&g_ml);
 }
-void dm_mouse_wheel(int notches) { pthread_mutex_lock(&g_ml); g_mwy += notches; pthread_mutex_unlock(&g_ml); }
+void dm_mouse_wheel(int notches) { pthread_mutex_lock(&g_ml); g_mwy += notches; g_mfwheel += notches; pthread_mutex_unlock(&g_ml); }
 void dm_key_modifier(uint32_t mask, int down) {
     pthread_mutex_lock(&g_ml);
     if (down) { g_kheld |= mask; g_klatch |= mask; } else g_kheld &= ~mask;
@@ -224,6 +226,20 @@ void dm_key_modifier(uint32_t mask, int down) {
 }
 
 int dm_touchscreen_mode(void) { return trackpad_on(); }   // for hle_hid.c: the mods' special button is Alt in Touchscreen Mode
+void dm_mouse_frame(uint64_t frame, dm_mouse_frame_t *out) {
+    pthread_mutex_lock(&g_ml);
+    if (!g_mfvalid || frame != g_mfframe) {
+        int stale = !g_mfvalid || frame - g_mfframe > 2;
+        uint32_t now = stale ? g_mheld : (g_mheld | g_mflatch);
+        if (stale) g_mfprev = g_mheld;
+        g_mfsnap.held = now; g_mfsnap.down = now & ~g_mfprev; g_mfsnap.up = g_mfprev & ~now;
+        g_mfsnap.wheel = stale ? 0 : g_mfwheel;
+        g_mfsnap.nx = g_mx / (float)(PANEL_W - 1); g_mfsnap.ny = g_my / (float)(PANEL_H - 1);
+        g_mfprev = now; g_mflatch = 0; g_mfwheel = 0; g_mfframe = frame; g_mfvalid = 1;
+    }
+    *out = g_mfsnap;
+    pthread_mutex_unlock(&g_ml);
+}
 uint32_t dm_key_modifiers(void) { pthread_mutex_lock(&g_ml); uint32_t k = g_kheld; pthread_mutex_unlock(&g_ml); return k; }   // the DM_KEY_* modifiers held now (no latch: nothing is consumed)
 
 // Fills n MouseStates (newest first; entry i has sampling number top - i); returns n, or 0 when the mouse is not connected (not Touchscreen Mode)

@@ -1,11 +1,13 @@
 #include "dm.h"
+#include "front.h"
+#include "dm_input.h"
 #include "hle_mods_gen.h"
 
-#define HEARTBEAT 600
-#define MAX_LINES 120
+int dm_touchscreen_mode(void);
+int dm_opmode(void);
+void dm_nvn_window_size(int *w, int *h);
 
-typedef struct { int hits, lines; uint64_t key[4]; } gate_t;
-static gate_t g_count, g_getter, g_end, g_icall, g_vcall;
+#define INPUT_PREFIX "UnityEngine.Input::"
 
 static int mod_enabled(void) {
     static int on = -1;
@@ -17,74 +19,68 @@ static int mod_enabled(void) {
     return on;
 }
 
-static int want_log(gate_t *g, const uint64_t key[4]) {
-    int hit = g->hits++;
-    int changed = hit == 0 || memcmp(g->key, key, sizeof g->key) != 0;
-    memcpy(g->key, key, sizeof g->key);
-    if (g->lines >= MAX_LINES) return 0;
-    if (!(changed || hit % HEARTBEAT == 0)) return 0;
-    if (++g->lines == MAX_LINES) LOG("[mod touch-ui] a gate's log capped at %d lines", MAX_LINES);
-    return 1;
+static void screen_size(int *w, int *h) {
+    dm_nvn_window_size(w, h);
+    if (*w > 0 && *h > 0) return;
+    int handheld = dm_opmode() == 0;
+    *w = handheld ? 1280 : 1920;
+    *h = handheld ? 720 : 1080;
 }
 
-static void on_touch_count(uint64_t *r, int p) {
+static dm_mouse_frame_t frame_now(void) {
+    dm_mouse_frame_t f;
+    dm_mouse_frame(dm_nvn_frame_count(), &f);
+    return f;
+}
+
+static uint32_t button_mask(int button) {
+    return button == 0 ? DM_MOUSE_LEFT : button == 1 ? DM_MOUSE_RIGHT : 0;
+}
+
+static int host_get_mouse_button(int button) { return (frame_now().held & button_mask(button)) != 0; }
+static int host_get_mouse_button_down(int button) { return (frame_now().down & button_mask(button)) != 0; }
+static int host_get_mouse_button_up(int button) { return (frame_now().up & button_mask(button)) != 0; }
+static int host_get_mouse_present(void) { return 1; }
+
+static void host_get_mouse_position(float *out) {
+    dm_mouse_frame_t f = frame_now();
+    int w, h;
+    screen_size(&w, &h);
+    out[0] = f.nx * (float)(w - 1);
+    out[1] = (1.0f - f.ny) * (float)(h - 1);
+    out[2] = 0.0f;
+}
+
+static void host_get_mouse_scroll_delta(float *out) {
+    out[0] = 0.0f;
+    out[1] = (float)frame_now().wheel;
+}
+
+static const struct { const char *name; void (*fn)(void); } k_icalls[] = {
+    { "GetMouseButton", (void (*)(void))host_get_mouse_button },
+    { "GetMouseButtonDown", (void (*)(void))host_get_mouse_button_down },
+    { "GetMouseButtonUp", (void (*)(void))host_get_mouse_button_up },
+    { "get_mousePresent", (void (*)(void))host_get_mouse_present },
+    { "get_mousePosition_Injected", (void (*)(void))host_get_mouse_position },
+    { "get_mouseScrollDelta_Injected", (void (*)(void))host_get_mouse_scroll_delta },
+};
+
+static void on_icall_resolved(uint64_t *r, int p) {
     (void)p;
     if (!mod_enabled()) return;
-    int count = (int)(uint32_t)r[0];
-    uint64_t key[4] = { (uint64_t)count, 0, 0, 0 };
-    if (want_log(&g_count, key)) LOG("[mod touch-ui] touch_count: hit %d touchCount=%d", g_count.hits - 1, count);
-}
-
-static void on_getter(uint64_t *r, int p) {
-    (void)p;
-    if (!mod_enabled() || !r[0]) return;
-    const uint8_t *obj = (const uint8_t *)(uintptr_t)r[0];
-    int flag = (int)(r[8] & 0xff), cnt = *(const int32_t *)(obj + 2272);
-    uint64_t key[4] = { r[0], (uint64_t)flag, (uint64_t)(uint32_t)cnt, 0 };
-    if (want_log(&g_getter, key)) LOG("[mod touch-ui] getter: hit %d obj %#llx flag[+24]=%d count[+2272]=%d", g_getter.hits - 1, (unsigned long long)r[0], flag, cnt);
-}
-
-static void on_poll_end(uint64_t *r, int p) {
-    (void)p;
-    if (!mod_enabled() || !r[19]) return;
-    const uint8_t *obj = (const uint8_t *)(uintptr_t)r[19];
-    int n = *(const int32_t *)(obj + 2240);
-    uint64_t key[4] = { (uint64_t)(uint32_t)n, (uint64_t)*(const int64_t *)(obj + 48), 0, 0 };
-    if (want_log(&g_end, key)) LOG("[mod touch-ui] poll exit: hit %d this %#llx count[+2240]=%d tracked[+48]=%lld lastSample[+2248]=%lld", g_end.hits - 1, (unsigned long long)r[19], n, (long long)*(const int64_t *)(obj + 48), (long long)*(const int64_t *)(obj + 2248));
-}
-
-static uint8_t *main_base(void) {
-    static uint8_t *base;
-    if (!base)
-        for (int i = 0; i < g_nmod; i++)
-            if (!strcmp(g_mod[i].name, "main") && !g_mod[i].nro) { base = g_mod[i].base; break; }
-    return base;
-}
-
-static void on_icall(uint64_t *r, int p) {
-    (void)p;
-    if (!mod_enabled()) return;
-    uint64_t target = r[0];
-    uint64_t key[4] = { target, 0, 0, 0 };
-    if (want_log(&g_icall, key)) LOG("[mod touch-ui] Input.get_touchCount icall target %#llx = main+%#llx (hit %d)", (unsigned long long)target, (unsigned long long)(target - (uint64_t)(uintptr_t)main_base()), g_icall.hits - 1);
-}
-
-static void on_vcall(uint64_t *r, int p) {
-    (void)p;
-    if (!mod_enabled() || !r[0] || !r[8]) return;
-    uint64_t base = (uint64_t)(uintptr_t)main_base();
-    const uint64_t *vt = (const uint64_t *)(uintptr_t)r[8];
-    uint64_t key[4] = { r[0], r[8], vt[3], vt[4] };
-    if (want_log(&g_vcall, key))
-        LOG("[mod touch-ui] touchCount manager %#llx vtable main+%#llx slots: [0]=%#llx [1]=%#llx [2]=%#llx [3 -> called]=main+%#llx [4]=main+%#llx [5]=main+%#llx (hit %d)", (unsigned long long)r[0],
-            (unsigned long long)(r[8] - base), (unsigned long long)vt[0] - base, (unsigned long long)vt[1] - base, (unsigned long long)vt[2] - base, (unsigned long long)(vt[3] - base), (unsigned long long)(vt[4] - base),
-            (unsigned long long)(vt[5] - base), g_vcall.hits - 1);
+    const char *name = (const char *)(uintptr_t)r[19];
+    if (!name || !r[0] || strncmp(name, INPUT_PREFIX, sizeof INPUT_PREFIX - 1)) return;
+    if (!dm_touchscreen_mode()) return;
+    const char *method = name + sizeof INPUT_PREFIX - 1;
+    for (size_t i = 0; i < sizeof k_icalls / sizeof k_icalls[0]; i++) {
+        size_t n = strlen(k_icalls[i].name);
+        if (strncmp(method, k_icalls[i].name, n) || (method[n] != '\0' && method[n] != '(')) continue;
+        LOG("[mod touch-ui] %s: icall %#llx replaced by the host's touchpad mouse", name, (unsigned long long)r[0]);
+        r[0] = (uint64_t)(uintptr_t)k_icalls[i].fn;
+        return;
+    }
 }
 
 __attribute__((constructor)) static void mod_touch_ui_attach(void) {
-    gate_obs_set(MODGATE_TOUCH_UI_TOUCH_COUNT, on_touch_count);
-    gate_obs_set(MODGATE_TOUCH_UI_GETTER, on_getter);
-    gate_obs_set(MODGATE_TOUCH_UI_ICALL, on_icall);
-    gate_obs_set(MODGATE_TOUCH_UI_VCALL, on_vcall);
-    gate_obs_set(MODGATE_TOUCH_UI_POLL_END, on_poll_end);
+    gate_obs_set(MODGATE_TOUCH_UI_ICALL_RESOLVED, on_icall_resolved);
 }
