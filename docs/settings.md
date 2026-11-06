@@ -4,7 +4,7 @@ The screen before the game starts shows the settings the game supports. A settin
 
 - [Tested defaults](#tested-defaults)
 - [Game](#game): [Frame rate](#frame-rate), [Render scale](#render-scale), [Console mode](#console-mode), [Upscaling](#upscaling), [Game language](#game-language), [Frame-rate counter](#frame-rate-counter)
-- [Controls](#controls): [Touchscreen Mode](#touchscreen-mode), [Touch feedback](#touch-feedback), [Hold to confirm + button](#hold-to-confirm--button), [Dedicated B button](#dedicated-b-button)
+- [Controls](#controls): [Touchscreen Mode](#touchscreen-mode), [Cursor sensitivity](#cursor-sensitivity), [Touch feedback](#touch-feedback), [Hold to confirm + button](#hold-to-confirm--button), [Dedicated B button](#dedicated-b-button)
 - [Performance](#performance): [Frame buffering](#frame-buffering), [Metal 4 pipelines](#metal-4-pipelines), [Pipeline prebuild](#pipeline-prebuild), [Encode thread](#encode-thread), [Hold frames when late](#hold-frames-when-late), [Performance HUD](#performance-hud), [Reset to tested defaults](#reset-to-tested-defaults)
 - [Memory](#memory): [Extend Memory Usage](#extend-memory-usage), [Reallocate Minimum](#reallocate-minimum)
 - [The Mac settings window](#the-mac-settings-window): [Display mode](#display-mode)
@@ -65,6 +65,10 @@ Shows the frames per second at the top left.
 ### Touchscreen Mode
 
 Turns the touch-ui mod (Mods) on by itself, which the mode needs to work, and keeps it on: the mod's switch is greyed out until Touchscreen Mode is off (it then stays on until you turn it off). With it on, the swipe gamepad is replaced by a touchpad and a keyboard: the screen is a trackpad for the game's own mouse cursor (the app draws none; drag to move it, tap for a left click, which the game gets as a touch at the cursor, touch and hold for a right click, swipe up or down with two fingers to scroll), and **Shift**, **Ctrl** and **Alt** are keys at the bottom left that count as held while a finger is on them. It works in Docked mode as well as Handheld. The game's controller interface is turned off by the mod. The mods that open with **R3** (Targetable Mass Attacks, Re-Extraction) open with **Alt** here. **Hold to confirm + button**, **Dedicated B button** and the swipe layout editor belong to the swipe gamepad and are greyed out while it is on. Off by default.
+
+### Cursor sensitivity
+
+How far the cursor travels for a finger's drag on the touchpad in Touchscreen Mode, from 50 % to 300 % of the normal speed (100 %). Only shown while Touchscreen Mode is on.
 
 ### Touch feedback
 
@@ -238,6 +242,7 @@ A line like `DM_PRESENT_SNAP=0` in `Documents/env.txt` (in the Files app, under 
 | Cloud saves folder (Mac) | `DM_SAVE_SYNC` | a folder; `icloud`: iCloud Drive › nxnative Saves; `0`: off |
 | Frame-rate counter | `DM_SHOW_FPS` | `1`, `0` |
 | Touchscreen Mode | `DM_TOUCHSCREEN` | `1`, `0` |
+| Cursor sensitivity | `DM_TRACKPAD_SPEED` | `0.5` to `3.0` |
 | Touch feedback | `DM_TOUCH_HAPTICS` | `1`, `0` |
 | Hold to confirm + button | `DM_HOLD_PLUS` | `1`, `0` |
 | Dedicated B button | `DM_DEDICATED_B` | `1`, `0` |

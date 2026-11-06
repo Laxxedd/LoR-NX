@@ -143,7 +143,7 @@ static const CGFloat
     K_CLICK_X = 102, K_CLICK_R = 17;                // L3 / R3: centre from the outer edge (level with ZL / ZR), radius
 // Touchscreen Mode: the touchpad (points) and the Shift / Ctrl / Alt keys (u)
 static const CGFloat
-    K_TP_GAIN = 1.5,                                // cursor speed: panel pixels per screen pixel of the picture, times this
+    K_TP_GAIN = 1.5,                                // cursor speed: panel pixels per screen pixel of the picture, times this (and times the launcher's Cursor sensitivity)
     K_TP_SLOP = 9,                                  // a finger that stays within this many points of where it landed has not moved (a tap, or a hold)
     K_TP_STEP = 26,                                 // two fingers travelling this many points up or down scroll the wheel one notch
     K_KB_W = 62, K_KB_H = 50, K_KB_GAP = 8,         // the modifier keys: square-ish, side by side
@@ -198,6 +198,12 @@ static CATextLayer *label(CALayer *parent, NSString *s) {
     CATextLayer *t = [CATextLayer layer];
     t.string = s; t.alignmentMode = kCAAlignmentCenter; t.foregroundColor = k_text.CGColor; t.contentsScale = UIScreen.mainScreen.scale;
     [parent addSublayer:t]; return t;
+}
+// The launcher's Cursor sensitivity (DM_TRACKPAD_SPEED, a multiplier of K_TP_GAIN; 0.5 to 3, 1 when unset or not a number)
+static CGFloat touchpad_speed(void) {
+    static CGFloat v = 0;
+    if (v == 0) { const char *e = getenv("DM_TRACKPAD_SPEED"); double d = e ? atof(e) : 0; v = d >= 0.5 && d <= 3.0 ? d : 1.0; }
+    return v;
 }
 static BOOL touchscreen_mode(void) { const char *e = getenv("DM_TOUCHSCREEN"); return e && atoi(e); }   // the launcher's Touchscreen Mode
 static BOOL fullOnly(int b) { return b == B_LS || b == B_RS || b >= B_LEFT; }   // keys shown only in the 3D layout
@@ -470,7 +476,7 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
             _padStart = _padLast = [t locationInView:self]; _padMoved = _padDead = _padRight = NO;
             [self padCancelHold]; _padTimer = [NSTimer scheduledTimerWithTimeInterval:K_TP_HOLD target:self selector:@selector(padHold:) userInfo:nil repeats:NO];
         } else {   // the second finger: no click or hold any more, a wheel instead
-            [self padCancelHold];
+            [self padCancelHold]; dm_mouse_drag(0);
             if (_padRight) { dm_mouse_button(DM_MOUSE_RIGHT, 0); _padRight = NO; }
             _padDead = YES; _padScroll = 0; _padScrollY = [self padMidY];
         }
@@ -482,8 +488,9 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
         if (!_padMoved) {
             if (hypot(p.x - _padStart.x, p.y - _padStart.y) <= K_TP_SLOP) return;
             _padMoved = YES; [self padCancelHold];
+            if (!_padRight) dm_mouse_drag(1);   // the game's cursor follows only a touch: hold one under the cursor while the finger drags
         }
-        CGFloat k = 1280.0 / [self picture].size.width * K_TP_GAIN;
+        CGFloat k = 1280.0 / [self picture].size.width * K_TP_GAIN * touchpad_speed();
         dm_mouse_move((p.x - _padLast.x) * k, (p.y - _padLast.y) * k); _padLast = p;
     } else if (_pad.count == 2 && ([ts containsObject:_pad[0]] || [ts containsObject:_pad[1]])) {
         CGFloat y = [self padMidY]; _padScroll += y - _padScrollY; _padScrollY = y;
@@ -499,7 +506,7 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
         for (int k = 0; k < 3; k++) if (_kbTouch[k] == t) { _kbTouch[k] = nil; dm_key_modifier(k_kbMask[k], 0); [self refreshKeys]; }
         if (![_pad containsObject:t]) continue;
         if (_pad.count == 1) {   // the last finger lifts
-            [self padCancelHold];
+            [self padCancelHold]; dm_mouse_drag(0);
             if (_padRight) { dm_mouse_button(DM_MOUSE_RIGHT, 0); _padRight = NO; }
             else if (!_padMoved && !_padDead && !cancelled) [self padClick];
             _padDead = NO;
@@ -508,7 +515,7 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
     }
 }
 - (void)tsReset {   // lets go of everything the touchpad and the keys hold
-    [self padCancelHold];
+    [self padCancelHold]; dm_mouse_drag(0);
     for (int k = 0; k < 3; k++) if (_kbTouch[k]) { _kbTouch[k] = nil; dm_key_modifier(k_kbMask[k], 0); }
     if (_padRight) { _padRight = NO; dm_mouse_button(DM_MOUSE_RIGHT, 0); }
     if (touchscreen_mode()) { _lmbEpoch++; dm_mouse_button(DM_MOUSE_LEFT, 0); }

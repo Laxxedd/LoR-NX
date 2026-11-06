@@ -204,17 +204,29 @@ static void trackpad_touch_push(int down) {   // the left button as finger 0 at 
     dm_touch t = {0, (floorf(g_mx) + 0.5f) / PANEL_W, (floorf(g_my) + 0.5f) / PANEL_H};
     dm_touch_set(&t, down ? 1 : 0);
 }
+// Dragging a finger on the touchpad holds a touch under the cursor (dm_mouse_drag): the game learns the pointer's position only from touches (its cursor stayed where the last click left it and jumped to the new
+// place on the next one), so the touch has to follow the finger. Dragging also drags what is under the cursor (a scroll list, a slider); letting go ends the touch without a click on anything the cursor moved onto.
+// DM_TRACKPAD_DRAG=0 turns it off (the cursor then moves on the mouse alone). Only with the click as a touch (trackpad_touch)
+static int trackpad_drag(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_TRACKPAD_DRAG"); v = trackpad_touch() && (e ? atoi(e) != 0 : 1); } return v; }
+static int g_mdrag;   // a finger is dragging the cursor (the touch is held)
+static int touch_wanted(void) { return (g_mheld & DM_MOUSE_LEFT) || g_mdrag; }
 void dm_mouse_move(float dx, float dy) {
     pthread_mutex_lock(&g_ml);
     float nx = fminf(fmaxf(g_mx + dx, 0), PANEL_W - 1), ny = fminf(fmaxf(g_my + dy, 0), PANEL_H - 1);
     g_mdx += nx - g_mx; g_mdy += ny - g_my; g_mx = nx; g_my = ny;
-    if (trackpad_touch() && (g_mheld & DM_MOUSE_LEFT)) trackpad_touch_push(1);
+    if (trackpad_touch() && touch_wanted()) trackpad_touch_push(1);
     pthread_mutex_unlock(&g_ml);
 }
 void dm_mouse_button(uint32_t mask, int down) {
     pthread_mutex_lock(&g_ml);
     if (down) { g_mheld |= mask; g_mlatch |= mask; } else g_mheld &= ~mask;
-    if (trackpad_touch() && (mask & DM_MOUSE_LEFT)) trackpad_touch_push(down);
+    if (trackpad_touch() && (mask & DM_MOUSE_LEFT)) trackpad_touch_push(touch_wanted());
+    pthread_mutex_unlock(&g_ml);
+}
+void dm_mouse_drag(int down) {
+    if (!trackpad_drag()) return;
+    pthread_mutex_lock(&g_ml);
+    if ((down != 0) != g_mdrag) { g_mdrag = down != 0; trackpad_touch_push(touch_wanted()); }
     pthread_mutex_unlock(&g_ml);
 }
 void dm_mouse_wheel(int notches) { pthread_mutex_lock(&g_ml); g_mwy += notches; pthread_mutex_unlock(&g_ml); }
