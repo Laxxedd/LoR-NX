@@ -14,7 +14,7 @@
 //   The virtual gamepad (layout button included) hides while a physical controller is connected and comes back when it is removed; meanwhile every touch goes to the game. Physical controllers keep every button (D-pad and right stick included) and map by position: bottom = B, right = A, left = Y, top = X (same positions as on a Switch controller); a Nintendo pad maps by its labels (pad_apple.h).
 //   Each physical controller is a player of its own (local co-op), as on the Mac: the first one connected is player 1, together with the touch gamepad, the next player 2, and so on up to 8; see "Physical controllers" below.
 //   Touchscreen Mode (DM_TOUCHSCREEN=1) replaces all of it: the screen is a touchpad for the game's mouse (tsBegan below: one finger drags the cursor, a tap is the left button, a hold the right button, two fingers moving up or down scroll the wheel;
-//     the app draws no cursor: the game's own is moved by the mouse; the left click reaches the game as a touch-screen press at the cursor, since the touch-ui mod makes the game read the touch screen: hle_touch.c trackpad_touch) and Shift / Ctrl / Alt keys at the bottom left are the keyboard's modifiers (front.h dm_mouse_*, dm_key_modifier). Clicks, scroll steps and the keys give a haptic tap while DM_TOUCH_HAPTICS is on.
+//     the app draws no cursor: the game's own is moved by the mouse) and Shift / Ctrl / Alt keys at the bottom left are the keyboard's modifiers (front.h dm_mouse_*, dm_key_modifier). Clicks, scroll steps and the keys give a haptic tap while DM_TOUCH_HAPTICS is on.
 //   Shaking the phone shakes the controller (DM_BTN_SHAKE: its six-axis sensor, hle_hid.c), whichever controls are in use; see "Shaking the phone" below.
 #import <UIKit/UIKit.h>
 #import <GameController/GameController.h>
@@ -258,9 +258,7 @@ static BOOL fullOnly(int b) { return b == B_LS || b == B_RS || b >= B_LEFT; }   
     for (int b = 0; b < B_N; b++) _key[b].hidden = _tap || _gesture || (fullOnly(b) && !_full);
     _ring.hidden = _knob.hidden = _tap || _gesture;
     [CATransaction commit];
-    // Touchscreen Mode never shows the swipe layout, so its full-screen view is not made at all: it starts out enabled (_padOff only turns it off on the next main-queue turn, in padsChanged:) and it takes every touch
-    // that lands on it, as a tap (A), a swipe (D-pad) or a hold (B), so nothing may sit over the touchpad that Touchscreen Mode's touches go to
-    if (_gesture && !_gestureView && !touchscreen_mode()) {
+    if (_gesture && !_gestureView) {
         _gestureView = (__bridge_transfer UIView *)dm_gesture_view_make();
         _gestureView.frame = self.bounds; _gestureView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
         [self addSubview:_gestureView];
@@ -666,7 +664,7 @@ static BOOL pads_slotted(GCController *gone) {
     GCController *c = note.object, *gone = [note.name isEqual:GCControllerDidDisconnectNotification] ? c : nil;
     if (c && (!c.extendedGamepad || g_merge)) LOG("controller %s: %s%s", gone ? "disconnected" : "connected", pad_name(c), c.extendedGamepad ? "" : " (no extended gamepad profile: not used)");
     BOOL any = g_merge ? pads_merged(gone) : pads_slotted(gone);
-    BOOL off = any || touchscreen_mode();   // Touchscreen Mode (DM_TOUCHSCREEN=1): the touch gamepad stays hidden, controller or not, and the touchpad (tsBegan) takes the touches: the game gets them as the mouse and, for a click, a touch at the cursor
+    BOOL off = any || touchscreen_mode();   // Touchscreen Mode (DM_TOUCHSCREEN=1): the touch gamepad stays hidden and every touch goes to the game, controller or not
     dispatch_async(dispatch_get_main_queue(), ^{ self->_padOff = off; self->_controls.hidden = off; self->_gestureView.hidden = off; self->_gestureView.userInteractionEnabled = !off; [self reset]; });   // the touch gamepad hides while any controller is in use
 }
 @end

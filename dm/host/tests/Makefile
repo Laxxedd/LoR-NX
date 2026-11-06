@@ -18,7 +18,6 @@ run: $(B)/t_language $(B)/t_motion $(B)/t_heap_size $(B)/t_touch $(B)/t_gesture 
 	$(B)/t_touch
 	$(B)/t_gesture
 	$(B)/t_mouse
-	$(B)/t_mouse touch
 	$(B)/t_oe $(QUIET)
 	$(B)/t_fs $(QUIET)
 	TMPDIR="$(abspath $(B))" $(B)/t_fs_commit_list

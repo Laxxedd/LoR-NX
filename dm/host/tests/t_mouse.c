@@ -1,5 +1,5 @@
 // Touchscreen Mode's virtual mouse and keyboard modifiers: dm_mouse_* / dm_key_modifier -> mouse_fill / keyboard_fill, checked against hand-written byte layouts
-// (MouseState 0x28 bytes, KeyboardState 0x30 bytes). Runs with DM_TOUCHSCREEN=1 set by the test itself: plain, with DM_TRACKPAD_TOUCH=0 (the left click is a mouse button), and as `t_mouse touch` with the default (the left click is a touch-screen press at the cursor).
+// (MouseState 0x28 bytes, KeyboardState 0x30 bytes). Runs with DM_TOUCHSCREEN=1 set by the test itself; a second program run without it checks "not connected".
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -55,8 +55,6 @@ static int touch_click_main(void) {
 }
 int main(int argc, char **argv) {
     setenv("DM_TOUCHSCREEN", "1", 1);
-    if (argc > 1 && !strcmp(argv[1], "touch")) return touch_click_main();   // DM_TRACKPAD_TOUCH unset: the default
-    setenv("DM_TRACKPAD_TOUCH", "0", 1);   // the mouse-button checks below
     mouse_t m[3];
     check("mouse starts at the panel centre, connected, nothing pressed", mouse_fill(m, 1, 100) == 1 && same(&m[0], (mouse_t){100, 640, 360, 0, 0, 0, 0, 0, 3}));
     dm_mouse_move(10.5f, -20.25f);

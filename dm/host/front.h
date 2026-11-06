@@ -43,8 +43,7 @@ void dm_touch_script(const dm_touch *t, int n);   // scripted touches (DM_KEYS, 
 // Touchscreen Mode's virtual mouse and keyboard modifiers (implemented by the host's hle_touch.c; called by the iOS front end's touchpad and keyboard keys, from the main thread).
 // With DM_TOUCHSCREEN=1 the game's nn::hid mouse and keyboard read these as a connected mouse and keyboard (hle_hid.c); otherwise they stay "not connected".
 // The cursor lives in the panel's 1280x720 coordinates, starts at the centre and is clamped to the panel; presses are latched (a press and release between two reads is still reported once).
-// The left button is reported as a touch-screen press at the cursor (finger 0), not as a mouse button: the touch-ui mod, which Touchscreen Mode turns on, makes the game read the touch screen. DM_TRACKPAD_TOUCH=0 reports
-// it as a mouse button instead (for a game that reads the mouse's buttons). The cursor, right button, wheel and keys are the mouse's either way.
+// DM_TRACKPAD_TOUCH=1 reports the left button as a touch-screen press at the cursor instead of a mouse button (for a game that ignores the mouse's buttons).
 enum { DM_MOUSE_LEFT = 1, DM_MOUSE_RIGHT = 2 };
 enum { DM_KEY_CTRL = 1, DM_KEY_SHIFT = 2, DM_KEY_ALT = 4 };
 void dm_mouse_move(float dx, float dy);              // moves the cursor by dx, dy panel pixels
