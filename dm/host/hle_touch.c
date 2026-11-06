@@ -195,11 +195,13 @@ static uint32_t g_mheld, g_mlatch, g_mprev;                          // mouse bu
 static uint32_t g_kheld, g_klatch, g_kprev;                          // keyboard modifiers, the same way
 
 static int trackpad_on(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_TOUCHSCREEN"); v = e && atoi(e); } return v; }
-static int trackpad_touch(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_TRACKPAD_TOUCH"); v = e && atoi(e); } return v; }
-static void trackpad_touch_push(int down) {   // DM_TRACKPAD_TOUCH: the left button as finger 0 at the cursor (called with g_ml held)
-    dm_touch t = {0, g_mx / PANEL_W, g_my / PANEL_H};
-    if (t.x > 0.999f) { t.x = 0.999f; }
-    if (t.y > 0.999f) { t.y = 0.999f; }
+// Whether the left click reaches the game as a touch-screen press at the cursor instead of a mouse button. On by default: Touchscreen Mode comes with the touch-ui mod (the launcher forces it on), which points the
+// game's Input.touchCount / GetTouch at the touch screen, so the touch screen is the only pointer input the game reads. With the touchpad producing mouse events alone, the touch screen stayed empty for ever and every
+// tap did nothing. DM_TRACKPAD_TOUCH=0 gives the plain mouse button back (for a game that reads the mouse).
+static int trackpad_touch(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_TRACKPAD_TOUCH"); v = e ? atoi(e) != 0 : 1; } return v; }
+static void trackpad_touch_push(int down) {   // the left button as finger 0 at the cursor (called with g_ml held)
+    // the middle of the pixel the mouse reports ((int)g_mx, (int)g_my): a coordinate that sits exactly on a pixel (410 / 720) comes out a hair below it as a float and would land one pixel short after clampi's truncation
+    dm_touch t = {0, (floorf(g_mx) + 0.5f) / PANEL_W, (floorf(g_my) + 0.5f) / PANEL_H};
     dm_touch_set(&t, down ? 1 : 0);
 }
 void dm_mouse_move(float dx, float dy) {

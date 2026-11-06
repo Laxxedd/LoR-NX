@@ -1,5 +1,5 @@
 // Touchscreen Mode's virtual mouse and keyboard modifiers: dm_mouse_* / dm_key_modifier -> mouse_fill / keyboard_fill, checked against hand-written byte layouts
-// (MouseState 0x28 bytes, KeyboardState 0x30 bytes). Runs with DM_TOUCHSCREEN=1 set by the test itself; a second program run without it checks "not connected".
+// (MouseState 0x28 bytes, KeyboardState 0x30 bytes). Runs with DM_TOUCHSCREEN=1 set by the test itself: plain, with DM_TRACKPAD_TOUCH=0 (the left click is a mouse button), and as `t_mouse touch` with the default (the left click is a touch-screen press at the cursor).
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,8 +18,32 @@ typedef struct { int64_t samp; int32_t x, y, dx, dy, wx, wy; uint32_t buttons, a
 _Static_assert(sizeof(mouse_t) == 0x28, "MouseState is 0x28 bytes");
 static void check(const char *what, int ok) { cases++; if (!ok) fails++; printf("%s %s\n", ok ? "✓" : "✗", what); }
 static int same(const mouse_t *g, mouse_t w) { return !memcmp(g, &w, sizeof w); }
-int main(void) {
+int touch_fill_n(void *out, int max, uint64_t now_ns);
+// The left click as a touch-screen press at the cursor (the default in Touchscreen Mode: the touch-ui mod makes the game read the touch screen, not the mouse's buttons)
+static int touch_click_main(void) {
+    mouse_t m[2]; uint8_t t[0x10 + 0x28]; int32_t v[4];
+    mouse_fill(m, 1, 1);
+    dm_mouse_move(100, 50);   // the cursor starts at the panel centre (640, 360); moving it alone presses nothing
+    check("moving the cursor gives no touch", touch_fill_n(t, 1, 1000) == 0);
+    dm_mouse_button(DM_MOUSE_LEFT, 1);
+    check("a left click reaches the touch screen: Start at the cursor", touch_fill_n(t, 1, 2000) == 1 && (memcpy(v, t + 0x10 + 8, 16), v[0] == 1 && v[1] == 0 && v[2] == 740 && v[3] == 410));
+    dm_mouse_button(DM_MOUSE_LEFT, 0);
+    check("..then End", touch_fill_n(t, 1, 3000) == 1 && (memcpy(v, t + 0x10 + 8, 16), v[0] == 2 && v[2] == 740 && v[3] == 410));
+    check("..then nothing", touch_fill_n(t, 1, 4000) == 0);
+    dm_mouse_button(DM_MOUSE_LEFT, 1); dm_mouse_button(DM_MOUSE_LEFT, 0);
+    check("a click between two reads still gives a Start", touch_fill_n(t, 1, 5000) == 1 && (memcpy(v, t + 0x10 + 8, 16), v[0] == 1));
+    touch_fill_n(t, 1, 6000);
+    check("the mouse does not report the left button as well", (dm_mouse_button(DM_MOUSE_LEFT, 1), mouse_fill(m, 1, 20) == 1 && !(m[0].buttons & DM_MOUSE_LEFT)));
+    dm_mouse_button(DM_MOUSE_LEFT, 0);
+    dm_mouse_button(DM_MOUSE_RIGHT, 1);
+    check("the right button stays a mouse button", mouse_fill(m, 1, 21) == 1 && m[0].buttons == DM_MOUSE_RIGHT && touch_fill_n(t, 1, 7000) == 1);   // the one touch is the End of the click above
+    printf("%d / %d passed\n", cases - fails, cases);
+    return fails != 0;
+}
+int main(int argc, char **argv) {
     setenv("DM_TOUCHSCREEN", "1", 1);
+    if (argc > 1 && !strcmp(argv[1], "touch")) return touch_click_main();   // DM_TRACKPAD_TOUCH unset: the default
+    setenv("DM_TRACKPAD_TOUCH", "0", 1);   // the mouse-button checks below
     mouse_t m[3];
     check("mouse starts at the panel centre, connected, nothing pressed", mouse_fill(m, 1, 100) == 1 && same(&m[0], (mouse_t){100, 640, 360, 0, 0, 0, 0, 0, 3}));
     dm_mouse_move(10.5f, -20.25f);
