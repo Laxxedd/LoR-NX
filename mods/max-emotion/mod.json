@@ -1,0 +1,28 @@
+{
+  "id": "max-emotion",
+  "title": "Max Emotion (Library of Ruina)",
+  "description": "Gives all librarians max emotion, activate by holding R3 or ALT",
+  "launcher": {
+    "env": "DM_MOD_MAXEMOTION",
+    "category": "Cheats",
+    "label": "Max Emotion",
+    "order": 110,
+    "note": "Gives all librarians max emotion, activate by holding R3 or ALT"
+  },
+  "game": "Library of Ruina 1.0.3",
+  "gates": [
+    "fixed_update_pre"
+  ],
+  "host": "host.c",
+  "obs": {
+    "_comment": "main build ID (first 16 bytes of the module ID, 32 hex digits) -> rows {gate, offset, word, reason}; word = the 4 bytes at offset read as a little-endian u32. Offsets are the RVAs of dump.cs (main = RVA + 0x234000 in the DmIOS file).",
+    "aeea627ddbd1214764dfef5f965e94a2": [
+      {
+        "gate": "fixed_update_pre",
+        "offset": "0x1d03870",
+        "word": "d10183ff",
+        "reason": "StageController.OnFixedUpdate entry (BattleSceneRoot.FixedUpdate calls it every fixed step of a battle): x0 = the StageController, whose _phase (0x70) is 5 = ApplyLibrarianCardPhase while the player plans the round"
+      }
+    ]
+  }
+}
