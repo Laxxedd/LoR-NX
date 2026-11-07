@@ -42,8 +42,9 @@ void dm_mod_gate_run(uint64_t *regs, int param, void (*fn)(uint64_t *, int));
 
 static uint8_t *s_main;
 static unsigned s_tick;
-static int g_hits;
+static int g_hits, g_dbg, s_last_phase = -1, s_was_held;
 static int first_hits(void) { return g_hits++ < 8; }
+static int dbg_hits(void) { return g_dbg++ < 40; }
 
 static uint8_t *main_base(void) {
     if (!s_main)
@@ -67,10 +68,16 @@ static void *list_get(void *list, int index) {
 // One level for one unit; 1 when it went up
 static int level_up_once(void *unit) {
     void *detail = FN(RVA_UNIT_GET_EMOTION_DETAIL, void *, void *, const void *)(unit, NULL);
-    if (!detail || field_int(detail, F_EMO_LEVEL) >= field_int(detail, F_EMO_MAX_LEVEL)) return 0;
-    int need = field_int(detail, F_EMO_MAX_COINS) - list_count(field(detail, F_EMO_COINS));
-    if (need > 0) FN(RVA_EMOTION_CREATE_COIN, int, void *, int, int, const void *)(detail, COIN_POSITIVE, need, NULL);
-    return FN(RVA_EMOTION_CHECK_LEVEL_UP, int, void *, const void *)(detail, NULL) & 1;
+    if (!detail) { if (dbg_hits()) LOG("[mod max-emotion] unit %#llx has no emotion detail", (unsigned long long)(uintptr_t)unit); return 0; }
+    int level = field_int(detail, F_EMO_LEVEL), max_level = field_int(detail, F_EMO_MAX_LEVEL);
+    if (level >= max_level) { if (dbg_hits()) LOG("[mod max-emotion] unit %#llx: level %d of max %d, nothing to do", (unsigned long long)(uintptr_t)unit, level, max_level); return 0; }
+    int have = list_count(field(detail, F_EMO_COINS)), need = field_int(detail, F_EMO_MAX_COINS) - have;
+    int made = need > 0 ? FN(RVA_EMOTION_CREATE_COIN, int, void *, int, int, const void *)(detail, COIN_POSITIVE, need, NULL) : 0;
+    int after = list_count(field(detail, F_EMO_COINS));
+    int up = FN(RVA_EMOTION_CHECK_LEVEL_UP, int, void *, const void *)(detail, NULL) & 1;
+    if (dbg_hits()) LOG("[mod max-emotion] unit %#llx: level %d of max %d, coins %d/%d, asked %d (returned %d), coins now %d, level up %d, level now %d",
+                        (unsigned long long)(uintptr_t)unit, level, max_level, have, field_int(detail, F_EMO_MAX_COINS), need, made, after, up, field_int(detail, F_EMO_LEVEL));
+    return up;
 }
 
 static void level_run(uint64_t *r, int param) {
@@ -78,6 +85,7 @@ static void level_run(uint64_t *r, int param) {
     if (!main_base()) return;
     void *manager = FN(RVA_BATTLEOBJMGR_GET_INSTANCE, void *, const void *)(NULL);
     void *units = manager ? FN(RVA_BATTLEOBJMGR_GET_ALIVE_LIST, void *, void *, int, const void *)(manager, FACTION_PLAYER, NULL) : NULL;
+    if (dbg_hits()) LOG("[mod max-emotion] tick: manager %#llx, %d living librarian(s)", (unsigned long long)(uintptr_t)manager, list_count(units));
     for (int i = 0, n = list_count(units); i < n; i++) {
         void *unit = list_get(units, i);
         if (!unit || field_int(unit, F_UNIT_FACTION) != FACTION_PLAYER || field_bool(unit, F_UNIT_DISPOSED) || field_bool(unit, F_BASE_DEAD_REAL) || field_bool(unit, F_BASE_KNOCKOUT)) continue;
@@ -99,9 +107,13 @@ static int mod_enabled(void) {
 
 static void on_fixed_update_pre(uint64_t *r, int p) {
     if (!mod_enabled()) return;
-    if (!(dm_mod_keys() & dm_mod_special())) { s_tick = 0; return; }
+    uint64_t keys = dm_mod_keys();
+    if (!(keys & dm_mod_special())) { s_tick = 0; s_was_held = 0; return; }
     void *stage = (void *)r[0];
-    if (!stage || field_int(stage, F_STAGE_PHASE) != PHASE_APPLY_LIBRARIAN_CARD) return;
+    int phase = stage ? field_int(stage, F_STAGE_PHASE) : -1;
+    if (!s_was_held) { s_was_held = 1; if (dbg_hits()) LOG("[mod max-emotion] button down: keys %#llx, special %#llx, stage %#llx, phase %d", (unsigned long long)keys, (unsigned long long)dm_mod_special(), (unsigned long long)(uintptr_t)stage, phase); }
+    if (phase != s_last_phase) { s_last_phase = phase; if (dbg_hits()) LOG("[mod max-emotion] held in phase %d (acts in %d)", phase, PHASE_APPLY_LIBRARIAN_CARD); }
+    if (!stage || phase != PHASE_APPLY_LIBRARIAN_CARD) return;
     if (s_tick++ % TICK_STEPS) return;
     dm_mod_gate_run(r, p, level_run);
 }
