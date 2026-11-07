@@ -15,3 +15,4 @@ third_party/ryujinx/**/bin/
 host/hle_mod_*.c
 host/hle_mods_gen.h
 host/hle_modsw_gen.h
+host/hle_modromfs_gen.h

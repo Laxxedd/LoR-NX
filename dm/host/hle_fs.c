@@ -170,6 +170,31 @@ static const char *fwd_slashes(const char *p, char *buf, size_t n) {
 }
 static int norm_rest(const char *rest, char *out, size_t n);
 static int rom_overlay_path(const mount_t *m, const char *rest, char *out, size_t n);
+#if __has_include("hle_modromfs_gen.h")
+#include "hle_modromfs_gen.h"
+#else
+#define MODROMFS_N 0
+static const char *const k_modromfs_env[1] = { "" };
+static const char *const k_modromfs_dir[1] = { "" };
+#endif
+// The folders the "rom" mount looks in before its base, as a colon-separated list: DM_ROMFS_OVERLAY as the player set it (a relative folder such as "." is the Documents folder, the app's working directory),
+// then, for every mod with RomFS files whose switch is 1, its folder inside the app: DM_MODS_ROMFS_DIR/<mod id> (<App>/modromfs, set by main.m; scripts/apply_mods.py lists the mods in hle_modromfs_gen.h).
+// The mod's files need no copy into Documents and no env.txt line
+static int rom_overlay_env(char *out, size_t n) {
+    const char *user = getenv("DM_ROMFS_OVERLAY"), *base = getenv("DM_MODS_ROMFS_DIR");
+    out[0] = 0;
+    if (user && *user) strlcpy(out, user, n);
+    for (int i = 0; base && *base && i < MODROMFS_N; i++) {
+        const char *on = getenv(k_modromfs_env[i]); char dir[1024];
+        if (!on || strcmp(on, "1")) continue;
+        snprintf(dir, sizeof dir, "%s/%s", base, k_modromfs_dir[i]);
+        if (access(dir, F_OK)) { LOG("[RED] mod %s: its RomFS files are not in the app (%s)", k_modromfs_env[i], dir); continue; }
+        if (strlen(out) + strlen(dir) + 2 > n) { LOG("[RED] RomFS overlay list too long, %s left out", dir); continue; }
+        if (out[0]) strlcat(out, ":", n);
+        strlcat(out, dir, n);
+    }
+    return out[0] != 0;
+}
 // A path on an image mount: returns 1 with the mount in *mi and the entry in *k (-1 with errno set when there is none); 0 for a path on any other mount, or one an overlay folder (DM_ROMFS_OVERLAY) has, which then opens as a host file
 static int img_path(const char *p, int *mi, int64_t *k) {
     PATH_LOCK(); char fwd[1024]; p = fwd_slashes(p, fwd, sizeof fwd); const char *c = p ? strchr(p, ':') : NULL; if (!c) return 0;
@@ -195,8 +220,7 @@ static Result mount_ex(const char *name, const char *dir, int ro, int txn) {
     g_mnt[g_nmnt].txn_root = -1;
     atomic_store(&g_mnt[g_nmnt].poison, 0);
     atomic_store(&g_mnt[g_nmnt].first_write_ns, 0);
-    if (!strcmp(name, "rom") && getenv("DM_ROMFS_OVERLAY"))
-        strlcpy(g_mnt[g_nmnt].overlay, getenv("DM_ROMFS_OVERLAY"), sizeof g_mnt[0].overlay);
+    if (!strcmp(name, "rom")) rom_overlay_env(g_mnt[g_nmnt].overlay, sizeof g_mnt[0].overlay);
     // The transaction directory cannot be set up (leftovers cannot be cleared / clone failed, which really happens on a full disk): do not exit; mount the committed directory read-only -- saves still read, every write fails, commits are no-ops, the committed version is untouched, and the front end is told
     // (each of these three failures used to call die: with the phone's storage full the game exited as soon as it mounted its saves)
     int txn_err = 0, k = 0;
@@ -434,10 +458,11 @@ HLE_FORCE("_ZN2nn2fs22QueryMountRomCacheSizeEPm", "fsp-srv; rom reads the host d
 HLE_FORCE("_ZN2nn2fs8MountRomEPKcPvm", "fsp-srv; rom → host RomFS directory", Result, h_fs_MountRom, const char *name, void *cache, size_t sz) {
     (void)cache; (void)sz; char b[1024];
     Result r = mount(name, envdir("DM_ROMFS", "romfs", b, sizeof b), 1);
-    if (r == RES_OK && getenv("DM_ROMFS_OVERLAY")) {
+    char ov[4096];
+    if (r == RES_OK && rom_overlay_env(ov, sizeof ov)) {
         PATH_LOCK();
         for (int i = 0; i < g_nmnt; i++) if (!strcmp(g_mnt[i].name, name)) {
-            strlcpy(g_mnt[i].overlay, getenv("DM_ROMFS_OVERLAY"), sizeof g_mnt[i].overlay); break;
+            strlcpy(g_mnt[i].overlay, ov, sizeof g_mnt[i].overlay); LOG("fs overlay for %s: %s", name, ov); break;
         }
     }
     return r;

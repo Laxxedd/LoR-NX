@@ -78,6 +78,8 @@ DM_MEMSTAT_DUMP	diagnostic	`=<seconds>`: with `DM_MEMSTAT`, at that second write
 DM_MEM_CAP_GB	switch	`=<GB>`: the memory watchdog exits when resident memory exceeds that many GB (default 24 on the Mac, none on iOS; `0` turns it off)
 DM_METAL_CAPTURE	diagnostic	`=1` makes `build_ipa.sh` produce a build that can write GPU frame captures (`MetalCaptureEnabled` in `Info.plist`), for `DM_GPU_CAPTURE`
 DM_METAL_HUD	player	`1` shows Apple's Metal performance HUD over the game (frame rate, frame and GPU time, memory)
+DM_MODS_ROMFS	path	Folder with one subfolder of RomFS files per mod (`<out>/romfs` of `scripts/apply_mods.py`, which also exports it to GitHub Actions); `build_ipa.sh` packs it into the app as `modromfs/` and passes it to `gen_resources.py`. Without it the folder beside `DM_MODS_PATCHES` is used
+DM_MODS_ROMFS_DIR	path	The app's `modromfs/` folder, set by `main.m` when it exists (a value already set wins): the host adds `<dir>/<mod id>` to the RomFS overlay for every mod with RomFS files whose switch is 1, after `DM_ROMFS_OVERLAY`
 DM_MOTION	switch	`0` ignores live motion: every six-axis sensor lies flat as before (a shake still plays), and neither controllers' motion sensors nor the phone's device motion are switched on (`hle_hid.c`, `motion_apple.h`, `DmGamepad.m`); the NSP script's `--no-motion` (`MOTION = False`) builds it in
 DM_MOTION_ACC_SIGN	switch	`-1` flips only GameController's acceleration, for a source that reports the specific force (+1 G up at rest) instead of the gravity direction (`motion_fusion.h`); phone and raw HID samples are already in the Switch frame
 DM_MOTION_AXES	switch	`=<map>` such as `x,-z,y`: maps Apple's controller axes to the Switch's, a signed permutation applied to acceleration and rotation alike, for a controller whose axes differ (default `x,y,z`; phone and raw HID samples are already in the Switch frame)
@@ -251,6 +253,7 @@ DM_RESOURCE_AOC	path	The add-on content folder the iOS build copies into the app
 DM_RESOURCE_BUILD	switch	Package version (for example `v327680`), written to `Gen/resources.env` by `gen_resources.py`; with `DM_COPY_ROMFS=NO` the copy phase puts it in the `build=` field of the app's `romfs.id`
 DM_RESOURCE_CHAIN_H	path	Path of `dm/gfx/nvn/dmsh_chain.h`, written to `Gen/resources.env` by `build_ipa.sh`; the Xcode copy phase (`stage_resources.sh`) stops when the prepared shaders are not of its chain version
 DM_RESOURCE_MARKER	path	A file under the RomFS, written to `Gen/resources.env` by `build_ipa.sh`, that the Xcode copy phase (`stage_resources.sh`) checks for before copying the game files
+DM_RESOURCE_MODROMFS	path	The mods' RomFS folder (empty for none), written to `Gen/resources.env` by `gen_resources.py` from `DM_MODS_ROMFS`; the Xcode copy phase (`stage_resources.sh`) copies it into the app's `modromfs/`
 DM_RESOURCE_MSLDIR	path	Name of the shader library folder (`b-<chain>`), written to `Gen/resources.env` by `build_ipa.sh`; the Xcode copy phase copies the shaders to `msl/<name>` in the app
 DM_RESOURCE_PSO	path	Folder of the offline Metal pipeline archive (empty for none), written to `Gen/resources.env` by `build_ipa.sh`; the Xcode copy phase copies it to `<App>/pso`
 DM_RESOURCE_ROMFS	path	RomFS folder, written to `Gen/resources.env` by `build_ipa.sh`; the Xcode copy phase (`stage_resources.sh`) copies it into the app's `romfs`
@@ -260,7 +263,7 @@ DM_RESOURCE_VERSION	switch	Display version, written to `Gen/resources.env` by `g
 DM_RES_CHECK	diagnostic	`=1` prints the first 40 textures or buffers a shader reaches through its argument block that are not in the residency set (textures attributed to their parent allocation)
 DM_REWRITE_J	switch	`=<positive integer>`: worker processes per module for `patch_nso.py`'s x18 scan and spin wait search; `=1` runs serially. Default: one per core directly, an automatic per-module budget in the NSP script. An explicit value overrides that budget
 DM_ROMFS	path	The game's RomFS folder, mounted read-only as `rom` (default `$DM_ROOT/romfs`); the Mac launcher, the iOS app and the NSP script set it
-DM_ROMFS_OVERLAY	path	`=<dir>[:<dir>…]`: RomFS reads look in these folders first, in order, and fall back to `DM_ROMFS` (for a modified copy of some files)
+DM_ROMFS_OVERLAY	path	`=<dir>[:<dir>…]`: RomFS reads look in these folders first, in order, and fall back to `DM_ROMFS` (for a modified copy of some files); the RomFS files of the mods that are switched on are looked in after these without this setting (`DM_MODS_ROMFS_DIR`)
 DM_ROOT	path	Workspace root (default `~/dm-work`): the host's and tools' default paths (RomFS, temporary storage, shader libraries under `build/cache/metal_shader_cache`, probe dumps) are under it
 DM_RT	diagnostic	`0` leaves the thread that acquires the window on its QoS only, with no Mach time-constraint policy declaring the frame deadline (on by default; for power A/B)
 DM_RT_COMP	switch	`=<ms>` fixes the computation the present thread's time-constraint policy declares; default `auto` re-declares it every 120 frames from that thread's per-frame CPU time (p90 and peak)

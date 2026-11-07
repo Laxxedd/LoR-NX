@@ -204,6 +204,8 @@ static int boot_env(void) {
     fprintf(stderr, "boot: shader libraries %s\n", msl.fileSystemRepresentation);
     setenv("DM_MSL_DIR", msl.fileSystemRepresentation, 0);
     setenv("DM_FONT_DIR", [dm stringByAppendingPathComponent:@"font"].fileSystemRepresentation, 0);   // Shared-font stand-ins (standard.ttf / nintendo_ext.ttf): iOS lacks the macOS font path
+    NSString *modromfs = [res stringByAppendingPathComponent:@"modromfs"];   // the RomFS files of the mods, one folder per mod (build_ipa.sh); the host adds the folder of each mod that is switched on to the RomFS overlay (hle_fs.c)
+    BOOL is_dir = NO; if ([fm fileExistsAtPath:modromfs isDirectory:&is_dir] && is_dir) setenv("DM_MODS_ROMFS_DIR", modromfs.fileSystemRepresentation, 0);
     aoc_locate();   // add-on content: Documents/aoc, else <App>/aoc; an empty Documents/aoc explicitly selects no DLC
     NSString *pso = [res stringByAppendingPathComponent:@"pso"];   // the pipeline archive made offline (build_ipa.sh, dm/gfx/tools/pso_offline.py): the shader pairs' bases, which the device then does not build
     if ([fm fileExistsAtPath:pso]) setenv("DM_PSO_BUNDLE", pso.fileSystemRepresentation, 0);

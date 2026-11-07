@@ -29,6 +29,10 @@ gp() { python3 "$DM/games/game.py" "$GAME" "$1" || die "game profile $GD: $1"; }
 PKG=$(gp package)
 if [ -z "${ROMFS:-}" ] && [ -f "$W/data/$PKG/RomFS.img" ]; then ROMFS=$W/data/$PKG/RomFS.img; fi
 PATCHED=${PATCHED:-$W/build/patched_$PKG}; ROMFS=${ROMFS:-$W/data/$PKG/RomFS}; MSL_IOS=${MSL_IOS:-$W/build/ios/dmsh_b}; AOC=${AOC-$W/data/aoc}
+# The RomFS files of the mods (scripts/apply_mods.py writes <out>/romfs/<mod id>/ beside patches.json): DM_MODS_ROMFS, else the romfs folder next to DM_MODS_PATCHES; they go into the app as modromfs/
+MODROMFS=${DM_MODS_ROMFS:-}; [ -n "$MODROMFS" ] || [ -z "${DM_MODS_PATCHES:-}" ] || MODROMFS=$(dirname "$DM_MODS_PATCHES")/romfs
+if [ -d "$MODROMFS" ] && [ -n "$(ls -A "$MODROMFS" 2> /dev/null)" ]; then MODROMFS=$(cd "$MODROMFS" && pwd); else MODROMFS=; fi
+export DM_MODS_ROMFS=$MODROMFS
 PREPARE_XCODE=NO; [ "${1:-}" != --prepare-xcode ] || PREPARE_XCODE=YES
 OUT_IPA=${1:-$(dirname "$W")/$(gp ipa)}; O=$W/build/ios/pkg; DD=$O/dd
 XCODE_DD=${DM_XCODE_DERIVED_DATA:-$W/build/ios/xcode-dd}
@@ -202,6 +206,7 @@ if [ "${DM_COPY_ROMFS:-YES}" = NO ]; then
 elif [ -f "$ROMFS" ]; then MAPS=("$P/romfs.img=$ROMFS"); else MAPS=("$P/romfs=$ROMFS"); fi
 if [ -n "$AOC" ] && [ -d "$AOC" ]; then MAPS+=("$P/aoc=$AOC"); t "add-on content: $(ls "$AOC" | tr '\n' ' ')"; fi
 if [ -n "${PSO:-}" ]; then MAPS+=("$P/pso=$PSO"); fi
+if [ -n "$MODROMFS" ]; then MAPS+=("$P/modromfs=$MODROMFS"); t "mod RomFS files: $(ls "$MODROMFS" | tr '\n' ' ')(app: modromfs/)"; fi
 MAPS+=("$P=$APP")
 t "pack IPA (already-compressed game files stored, everything else deflated)"
 # The pulling vertex libraries (<key>_bp, dm/gfx/tools/dmsh_pull.py) serve the hybrid pipelines. Default to the same pso_mtl4 setting compiled by gen_build.py; IOS_PULL=0 / 1 overrides it.
@@ -218,5 +223,5 @@ if [ "${DM_COPY_SHADERS:-YES}" = NO ]; then
   MAPS+=("$P/msl.id=$O/msl.id")
   t "no shader libraries in the IPA (DM_COPY_SHADERS=NO): the app takes Documents/msl, staged at $O/shaders/msl ($MSLID); scripts/push_shaders.sh <device UDID> ${DM_BUNDLE_ID} \"$O/shaders/msl\""
 else MAPS+=("$P/msl/$MSLDIR=$MSL_IOS/$MSLDIR"); fi
-python3 tools/pack_ipa.py "$OUT_IPA" "${PACK_OPTS[@]}" --skip $P/_CodeSignature --skip $P/embedded.mobileprovision --skip $P/msl --skip $P/msl.id --skip $P/aoc --skip $P/romfs --skip $P/romfs.img --skip $P/romfs.id "${MAPS[@]}" || die "pack_ipa"
+python3 tools/pack_ipa.py "$OUT_IPA" "${PACK_OPTS[@]}" --skip $P/_CodeSignature --skip $P/embedded.mobileprovision --skip $P/msl --skip $P/msl.id --skip $P/aoc --skip $P/modromfs --skip $P/romfs --skip $P/romfs.img --skip $P/romfs.id "${MAPS[@]}" || die "pack_ipa"
 t "done: $OUT_IPA ($(du -h "$OUT_IPA" | cut -f1))"

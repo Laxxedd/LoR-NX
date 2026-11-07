@@ -14,6 +14,8 @@ resource_dm=$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).re
 python3 "$resource_dm/tools/romfs.py" "$DM_RESOURCE_ROMFS" "$DM_RESOURCE_MARKER" || die "Game files unavailable: $DM_RESOURCE_ROMFS/$DM_RESOURCE_MARKER"
 [ -d "$DM_RESOURCE_SHADERS" ] || die "Shader libraries unavailable: $DM_RESOURCE_SHADERS"
 [ -z "$DM_RESOURCE_AOC" ] || [ -d "$DM_RESOURCE_AOC" ] || die "Add-on content unavailable: $DM_RESOURCE_AOC"
+DM_RESOURCE_MODROMFS=${DM_RESOURCE_MODROMFS:-}
+[ -z "$DM_RESOURCE_MODROMFS" ] || [ -d "$DM_RESOURCE_MODROMFS" ] || die "Mod RomFS files unavailable: $DM_RESOURCE_MODROMFS (run scripts/apply_mods.py again)"
 DM_RESOURCE_PSO=${DM_RESOURCE_PSO:-}   # (a project prepared before the pipeline archive has none)
 [ -z "$DM_RESOURCE_PSO" ] || [ -f "$DM_RESOURCE_PSO/prebuilt.tsv" ] || die "Pipeline archive unavailable: $DM_RESOURCE_PSO"
 # The host is compiled from the repository's current sources and loads only msl/b-<its chain version>: after a chain change (a pull, dmsh_chain.py --header) the prepared shaders are another chain's
@@ -65,4 +67,11 @@ if [ -n "$DM_RESOURCE_PSO" ]; then
     /usr/bin/rsync -a --delete -- "$DM_RESOURCE_PSO/" "$APP/pso/"
 else
     rm -rf "$APP/pso"
+fi
+# The mods' RomFS files (scripts/apply_mods.py): <App>/modromfs/<mod id>/, which main.m hands the host as DM_MODS_ROMFS_DIR
+if [ -n "$DM_RESOURCE_MODROMFS" ]; then
+    mkdir -p "$APP/modromfs"
+    /usr/bin/rsync -a --delete -- "$DM_RESOURCE_MODROMFS/" "$APP/modromfs/"
+else
+    rm -rf "$APP/modromfs"
 fi

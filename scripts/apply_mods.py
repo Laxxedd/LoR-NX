@@ -10,7 +10,8 @@ For the selected mods it
     as the patch says when the mod's env switch is 1 and as the game has it otherwise; the env names go to dm/host/hle_modsw_gen.h, which the host (hle_modsw.c) turns into the switch bytes at the start;  - gives every gate in their mod.json an observation-gate number (32..63) and writes dm/host/hle_mods_gen.h with MODGATE_<MOD>_<GATE> defines;
   - copies each mod's host.c to dm/host/hle_mod_<id>.c (the host Makefile takes hle_*.c by wildcard; a mod attaches its callbacks from a constructor, as hle_svc.c does);
   - writes DIR/patches.json, the gates for the rewriter (dm/tools/patch_nso.py reads it through DM_MODS_PATCHES);
-  - merges the mods' romfs folders into DIR/romfs, the folder for DM_ROMFS_OVERLAY on the device;
+  - copies each mod's romfs folder to DIR/romfs/<mod id>/, which build_ipa.sh packs into the app as <App>/modromfs/<mod id>/ (DM_MODS_ROMFS, also exported through $GITHUB_ENV); the host (hle_fs.c) adds
+    the folder of every mod whose switch is 1 to the RomFS overlay by itself, so the player copies nothing and sets no DM_ROMFS_OVERLAY. The mods with a romfs folder are listed in dm/host/hle_modromfs_gen.h;
   - writes DIR/launcher_mods.json, one off-by-default toggle per mod under the launcher section "Mods" (dm/games/settings.py adds it to the app's launcher.json when DM_MODS_SETTINGS names it).
 With --mods none it removes what an earlier run left. In GitHub Actions it also exports DM_MODS_PATCHES through $GITHUB_ENV.
 """
@@ -96,13 +97,13 @@ def main():
     bad = [m for m in want if m not in have]
     if bad: sys.exit(f'[RED] unknown mod {", ".join(bad)}; available: {", ".join(have) or "none"}')
     host = os.path.join(ROOT, 'dm', 'host')
-    for old in glob.glob(os.path.join(host, 'hle_mod_*.c')) + [os.path.join(host, 'hle_mods_gen.h'), os.path.join(host, 'hle_modsw_gen.h')]:
+    for old in glob.glob(os.path.join(host, 'hle_mod_*.c')) + [os.path.join(host, 'hle_mods_gen.h'), os.path.join(host, 'hle_modsw_gen.h'), os.path.join(host, 'hle_modromfs_gen.h')]:
         if os.path.exists(old): os.remove(old)
     shutil.rmtree(a.out, ignore_errors=True)
     if not want:
         print('no mods selected'); return
     os.makedirs(a.out)
-    defs, obs, number, launcher, switch, switch_env = [], {}, FIRST_GATE, [], {}, []
+    defs, obs, number, launcher, switch, switch_env, romfs_mods = [], {}, FIRST_GATE, [], {}, [], []
     launcher_groups = []   # (launcher.order, mod id, rows): the Mods section lists the mods by order, then id (mod.json launcher "order", default 0; the launcher's mods page groups them by launcher "category")
     for mid in sorted(set(want)):
         d = os.path.join(ROOT, 'mods', mid)
@@ -166,8 +167,9 @@ def main():
                 for off, word, why in rows: switch.setdefault(bid, []).append([off, idx, word, why, expect.get(off)]); n_sw += 1
             print(f'mod {mid}: {n_sw} patched words in the exefs files, switch {env} (byte {idx})')
         romfs = os.path.join(d, mod.get('romfs', 'romfs'))
-        if os.path.isdir(romfs):
-            shutil.copytree(romfs, os.path.join(a.out, 'romfs'), dirs_exist_ok=True, ignore=shutil.ignore_patterns('.gitkeep'))
+        if os.path.isdir(romfs) and any(n != '.gitkeep' for _, _, fs in os.walk(romfs) for n in fs):
+            shutil.copytree(romfs, os.path.join(a.out, 'romfs', mid), ignore=shutil.ignore_patterns('.gitkeep'))
+            romfs_mods.append((env, mid))
         print(f'mod {mid}: {len(nums)} gates, {n_rows} gate rows for builds {", ".join(sorted({b for b in mod.get("obs", {}) if re.fullmatch(r"[0-9a-f]{32}", b)})) or "none yet"}')
         if mod.get('gates') and not n_rows: print(f'[warn] {mid} has no gate rows: it is built in but nothing will call it until mod.json has rows for your main\'s build ID')
     launcher = [r for _, _, rows in sorted(launcher_groups, key=lambda g: g[:2]) for r in rows]
@@ -179,10 +181,15 @@ def main():
         with open(os.path.join(host, 'hle_modsw_gen.h'), 'w', encoding='utf-8') as f:
             f.write('// written by scripts/apply_mods.py; do not edit\n#pragma once\n#define MODSW_N %d\nstatic const char *const k_modsw_env[MODSW_N] = { %s };\n' % (len(switch_env), ', '.join(f'"{e}"' for e in switch_env)))
     os.makedirs(os.path.join(a.out, 'romfs'), exist_ok=True)
+    if romfs_mods:
+        with open(os.path.join(host, 'hle_modromfs_gen.h'), 'w', encoding='utf-8') as f:
+            f.write('// written by scripts/apply_mods.py; do not edit\n#pragma once\n#define MODROMFS_N %d\nstatic const char *const k_modromfs_env[MODROMFS_N] = { %s };\nstatic const char *const k_modromfs_dir[MODROMFS_N] = { %s };\n'
+                    % (len(romfs_mods), ', '.join(f'"{e}"' for e, _ in romfs_mods), ', '.join(f'"{m}"' for _, m in romfs_mods)))
     ls = os.path.abspath(os.path.join(a.out, 'launcher_mods.json'))
     with open(ls, 'w', encoding='utf-8') as f: json.dump({'settings': launcher}, f, indent=1, ensure_ascii=False)
-    print(f'DM_MODS_PATCHES={pj}\nDM_MODS_SETTINGS={ls}')
+    rf = os.path.abspath(os.path.join(a.out, 'romfs'))
+    print(f'DM_MODS_PATCHES={pj}\nDM_MODS_SETTINGS={ls}\nDM_MODS_ROMFS={rf}')
     if os.environ.get('GITHUB_ENV'):
-        with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as f: f.write(f'DM_MODS_PATCHES={pj}\nDM_MODS_SETTINGS={ls}\n')
+        with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as f: f.write(f'DM_MODS_PATCHES={pj}\nDM_MODS_SETTINGS={ls}\nDM_MODS_ROMFS={rf}\n')
 
 if __name__ == '__main__': main()
