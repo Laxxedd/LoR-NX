@@ -195,6 +195,7 @@ static int g_mwy;                                                    // wheel no
 static uint32_t g_mheld, g_mlatch, g_mprev;                          // mouse buttons: held now, pressed since the last read, reported by the last read
 static uint32_t g_kheld, g_klatch, g_kprev;                          // keyboard modifiers, the same way
 static uint32_t g_kkheld[8], g_kklatch[8], g_kkprev[8];              // the other keys, one bit per USB usage 0..255 (bit n = word n / 32, bit n % 32), the same way
+static uint32_t g_kflatch, g_kkflatch[8], g_kfprev[8]; static uint64_t g_kfframe; static int g_kfvalid; static dm_key_frame_t g_kfsnap;
 static uint32_t g_mflatch, g_mfprev; static int32_t g_mfwheel; static uint64_t g_mfframe; static int g_mfvalid; static dm_mouse_frame_t g_mfsnap;
 
 static int trackpad_on(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_TOUCHSCREEN"); v = e && atoi(e); } return v; }
@@ -222,7 +223,7 @@ void dm_mouse_button(uint32_t mask, int down) {
 void dm_mouse_wheel(int notches) { pthread_mutex_lock(&g_ml); g_mwy += notches; g_mfwheel += notches; pthread_mutex_unlock(&g_ml); }
 void dm_key_modifier(uint32_t mask, int down) {
     pthread_mutex_lock(&g_ml);
-    if (down) { g_kheld |= mask; g_klatch |= mask; } else g_kheld &= ~mask;
+    if (down) { g_kheld |= mask; g_klatch |= mask; g_kflatch |= mask; } else g_kheld &= ~mask;
     pthread_mutex_unlock(&g_ml);
 }
 
@@ -231,7 +232,7 @@ void dm_key_press(uint32_t usage, int down) {
     if (usage >= 256) return;
     uint32_t w = usage / 32, b = 1u << (usage % 32);
     pthread_mutex_lock(&g_ml);
-    if (down) { g_kkheld[w] |= b; g_kklatch[w] |= b; } else g_kkheld[w] &= ~b;
+    if (down) { g_kkheld[w] |= b; g_kklatch[w] |= b; g_kkflatch[w] |= b; } else g_kkheld[w] &= ~b;
     pthread_mutex_unlock(&g_ml);
 }
 
@@ -248,6 +249,23 @@ void dm_mouse_frame(uint64_t frame, dm_mouse_frame_t *out) {
         g_mfprev = now; g_mflatch = 0; g_mfwheel = 0; g_mfframe = frame; g_mfvalid = 1;
     }
     *out = g_mfsnap;
+    pthread_mutex_unlock(&g_ml);
+}
+void dm_key_frame(uint64_t frame, dm_key_frame_t *out) {
+    pthread_mutex_lock(&g_ml);
+    if (!g_kfvalid || frame != g_kfframe) {
+        int stale = !g_kfvalid || frame - g_kfframe > 2;
+        for (int w = 0; w < 8; w++) {
+            uint32_t held = g_kkheld[w], latch = g_kkflatch[w];
+            if (w == 7) { held |= g_kheld & 7u; latch |= g_kflatch & 7u; }
+            uint32_t now = stale ? held : (held | latch);
+            if (stale) g_kfprev[w] = held;
+            g_kfsnap.held[w] = now; g_kfsnap.down[w] = now & ~g_kfprev[w]; g_kfsnap.up[w] = g_kfprev[w] & ~now;
+            g_kfprev[w] = now; g_kkflatch[w] = 0;
+        }
+        g_kflatch = 0; g_kfframe = frame; g_kfvalid = 1;
+    }
+    *out = g_kfsnap;
     pthread_mutex_unlock(&g_ml);
 }
 uint32_t dm_key_modifiers(void) { pthread_mutex_lock(&g_ml); uint32_t k = g_kheld; pthread_mutex_unlock(&g_ml); return k; }   // the DM_KEY_* modifiers held now (no latch: nothing is consumed)

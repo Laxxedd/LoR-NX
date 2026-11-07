@@ -24,6 +24,8 @@ uint64_t dm_mod_keys(void);
 uint64_t dm_mod_special(void);
 typedef struct { float nx, ny; uint32_t held, down, up; int32_t wheel; } dm_mouse_frame_t;
 void dm_mouse_frame(uint64_t frame, dm_mouse_frame_t *out);
+typedef struct { uint32_t held[8], down[8], up[8]; } dm_key_frame_t;
+void dm_key_frame(uint64_t frame, dm_key_frame_t *out);
 // Hides keys from the game's reads for ms milliseconds from the call (the dm_cheats_keys bit layout; hle_hid.c): for mods that take a key over while their own UI is open; renew it each frame, it lapses by itself. dm_cheats_keys still sees them
 void dm_mod_input_mask(uint64_t keys, uint32_t ms);
 // Physical controller path (Mac / iOS GameController): stored separately from keyboard / touch and scripted input (DM_KEYS / DM_CTL); when the game reads player 1,

@@ -124,7 +124,43 @@ static void host_get_mouse_scroll_delta(float *out) {
     out[1] = (float)frame_now().wheel;
 }
 
+static int usage_of_keycode(int code) {
+    switch (code) {
+    case 27: return 41;
+    case 32: return 44;
+    case 303: case 304: return 225;
+    case 305: case 306: return 224;
+    case 307: case 308: return 226;
+    default: return -1;
+    }
+}
+
+static dm_key_frame_t key_frame_now(void) {
+    dm_key_frame_t k;
+    dm_key_frame(game_frame(), &k);
+    return k;
+}
+
+static int key_bit(const uint32_t *set, int code) {
+    int u = usage_of_keycode(code);
+    return u >= 0 && ((set[u / 32] >> (u % 32)) & 1u);
+}
+
+static int host_get_key(int code) { dm_key_frame_t k = key_frame_now(); return key_bit(k.held, code); }
+static int host_get_key_down(int code) { dm_key_frame_t k = key_frame_now(); return key_bit(k.down, code); }
+static int host_get_key_up(int code) { dm_key_frame_t k = key_frame_now(); return key_bit(k.up, code); }
+
+static int host_get_any_key_down(void) {
+    dm_key_frame_t k = key_frame_now();
+    for (int i = 0; i < 8; i++) if (k.down[i]) return 1;
+    return (frame_now().down & (DM_MOUSE_LEFT | DM_MOUSE_RIGHT)) != 0;
+}
+
 static const struct { const char *name; void (*fn)(void); } k_icalls[] = {
+    { "GetKeyInt", (void (*)(void))host_get_key },
+    { "GetKeyDownInt", (void (*)(void))host_get_key_down },
+    { "GetKeyUpInt", (void (*)(void))host_get_key_up },
+    { "get_anyKeyDown", (void (*)(void))host_get_any_key_down },
     { "GetMouseButton", (void (*)(void))host_get_mouse_button },
     { "GetMouseButtonDown", (void (*)(void))host_get_mouse_button_down },
     { "GetMouseButtonUp", (void (*)(void))host_get_mouse_button_up },

@@ -16,6 +16,8 @@ int mouse_fill(void *out, int n, int64_t top);
 int keyboard_fill(void *out, int n, int64_t top);
 typedef struct { float nx, ny; uint32_t held, down, up; int32_t wheel; } frame_t;
 void dm_mouse_frame(uint64_t frame, frame_t *out);
+typedef struct { uint32_t held[8], down[8], up[8]; } kframe_t;
+void dm_key_frame(uint64_t frame, kframe_t *out);
 typedef struct { uint32_t id; float x, y; } dm_touch;
 static int fails, cases;
 typedef struct { int64_t samp; int32_t x, y, dx, dy, wx, wy; uint32_t buttons, attr; } mouse_t;
@@ -23,6 +25,38 @@ _Static_assert(sizeof(mouse_t) == 0x28, "MouseState is 0x28 bytes");
 static void check(const char *what, int ok) { cases++; if (!ok) fails++; printf("%s %s\n", ok ? "✓" : "✗", what); }
 static int same(const mouse_t *g, mouse_t w) { return !memcmp(g, &w, sizeof w); }
 int touch_fill_n(void *out, int max, uint64_t now_ns);
+static void key_frame_cases(void)
+{
+        kframe_t a, b;
+        #define KB(set, u) (((set)[(u) / 32] >> ((u) % 32)) & 1u)
+        dm_key_press(DM_KEYCODE_SPACE, 1); dm_key_press(DM_KEYCODE_SPACE, 0);
+        dm_key_frame(2000, &a);
+        check("keys: the first read drops what happened before the game asked", !KB(a.held, 44) && !KB(a.down, 44));
+        dm_key_press(DM_KEYCODE_SPACE, 1);
+        dm_key_frame(2001, &a); dm_key_frame(2001, &b);
+        check("keys: a press is Down and held for exactly its frame", KB(a.held, 44) && KB(a.down, 44) && !KB(a.up, 44) && !memcmp(&a, &b, sizeof a));
+        dm_key_frame(2002, &a);
+        check("keys: then held, no longer Down", KB(a.held, 44) && !KB(a.down, 44));
+        dm_key_press(DM_KEYCODE_SPACE, 0);
+        dm_key_frame(2003, &a);
+        check("keys: the release is Up for one frame", !KB(a.held, 44) && KB(a.up, 44));
+        dm_key_press(DM_KEYCODE_ESCAPE, 1); dm_key_press(DM_KEYCODE_ESCAPE, 0);
+        dm_key_frame(2004, &a);
+        check("keys: a press and release between two frames is Down and held once", KB(a.held, 41) && KB(a.down, 41));
+        dm_key_frame(2005, &a);
+        check("keys: ..and Up in the next", !KB(a.held, 41) && KB(a.up, 41));
+        dm_key_modifier(DM_KEY_SHIFT, 1);
+        dm_key_frame(2006, &a);
+        check("keys: Shift is usage 225", KB(a.held, 225) && KB(a.down, 225) && !KB(a.held, 224));
+        dm_key_modifier(DM_KEY_SHIFT, 0);
+        dm_key_frame(2007, &a);
+        check("keys: ..and its release is Up", !KB(a.held, 225) && KB(a.up, 225));
+        dm_key_press(DM_KEYCODE_SPACE, 1);
+        dm_key_frame(2020, &a);
+        check("keys: after frames nobody asked in, a held key is not Down", KB(a.held, 44) && !KB(a.down, 44));
+        dm_key_press(DM_KEYCODE_SPACE, 0);
+        #undef KB
+}
 // The left click as a touch-screen press at the cursor (the default in Touchscreen Mode: the touch-ui mod makes the game read the touch screen, not the mouse's buttons)
 static int touch_click_main(void) {
     mouse_t m[2]; uint8_t t[0x10 + 0x28]; int32_t v[4];
@@ -46,6 +80,7 @@ static int touch_click_main(void) {
     dm_mouse_move(10, -10); dm_mouse_move(5, 5);
     check("moving the cursor holds no touch", touch_fill_n(t, 1, 9000) == 0 && touch_fill_n(t, 1, 9001) == 0);
     check("..the mouse has the new position", mouse_fill(m, 1, 31) == 1 && m[0].x == 755 && m[0].y == 405);
+    key_frame_cases();
     printf("%d / %d passed\n", cases - fails, cases);
     return fails != 0;
 }
@@ -142,6 +177,7 @@ int main(int argc, char **argv) {
     dm_mouse_move(-640, -360);
     dm_mouse_frame(1024, &f);
     check("..and the position follows each frame, not each call", f.nx > 0.49f && f.nx < 0.51f && f.ny > 0.49f && f.ny < 0.51f);
+    key_frame_cases();
     printf("%d / %d passed\n", cases - fails, cases);
     return fails != 0;
 }
