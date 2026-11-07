@@ -32,6 +32,7 @@ static void screen_size(int *w, int *h) {
 #define K_INPUT_MANAGER_SLOT 1u
 #define F_MOUSE_X 0xC8u
 #define F_MOUSE_Y 0xCCu
+#define K_RESOLVE_ICALL 0x32F5B4u
 
 static uint8_t *main_base(void) {
     static uint8_t *base;
@@ -56,9 +57,32 @@ static void push_engine_position(float x, float y) {
     if (!logged++) LOG("[mod touch-ui] engine mouse position at InputManager %p fed from the touchpad", (void *)mgr);
 }
 
+static int (*g_unity_frame_count)(void);
+
+static uint64_t game_frame(void) {
+    static int tried;
+    if (!tried) {
+        tried = 1;
+        uint8_t *base = main_base();
+        if (base && strncmp(dm_main_build(), K_BUILD_ID, 32) == 0) {
+            void *(*resolve)(const char *) = (void *(*)(const char *))(base + K_RESOLVE_ICALL);
+            void *fn = resolve("UnityEngine.Time::get_frameCount()");
+            if (!fn) fn = resolve("UnityEngine.Time::get_frameCount");
+            if (fn) {
+                g_unity_frame_count = (int (*)(void))fn;
+                LOG("[mod touch-ui] mouse edges follow Time.frameCount (native %p)", fn);
+            } else {
+                LOG("[mod touch-ui] Time.frameCount not found, mouse edges follow the present count");
+            }
+        }
+    }
+    if (g_unity_frame_count) return (uint64_t)(uint32_t)g_unity_frame_count();
+    return dm_nvn_frame_count();
+}
+
 static dm_mouse_frame_t frame_now(void) {
     static uint64_t pushed = ~0ull;
-    uint64_t frame = dm_nvn_frame_count();
+    uint64_t frame = game_frame();
     dm_mouse_frame_t f;
     dm_mouse_frame(frame, &f);
     if (pushed != frame) {
