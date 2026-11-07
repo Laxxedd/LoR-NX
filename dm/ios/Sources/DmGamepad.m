@@ -149,6 +149,7 @@ static const CGFloat
     K_KB_W = 62, K_KB_H = 50, K_KB_GAP = 8,         // the modifier keys: square-ish, side by side
     K_KB_X = 22, K_KB_Y = 20, K_KB_R = 8;           // the first key's distance from the left edge and the bottom, corner radius
 static const NSTimeInterval K_TP_HOLD = 0.45;       // a finger held still this long is the right button
+static const CFTimeInterval K_TP_DRAG = 0.30;
 static const uint32_t k_kbMask[3] = {DM_KEY_SHIFT, DM_KEY_CTRL, DM_KEY_ALT};   // left to right
 static const int k_btns[] = {B_ZL, B_L, B_ZR, B_R, B_MINUS, B_PLUS, B_LS, B_RS};   // keys locked at touch-down (L3 / R3 only in the 3D layout)
 int dm_opmode(void);   // hle_oe.c: 0 = handheld
@@ -184,6 +185,7 @@ static void pads_start(void);   // Physical controllers, below
     CGPoint _padStart, _padLast; BOOL _padMoved, _padDead, _padRight;   // one finger: where it landed / was last applied, moved past the slop, the gesture is over (two fingers were down: nothing more until all lift), the right button is held
     CGFloat _padScroll, _padScrollY;               // two fingers: vertical travel not yet turned into a notch, their mid point's last y
     NSTimer *_padTimer; NSUInteger _lmbEpoch;      // the hold timer; counts left clicks so an old release cannot let go of a newer press
+    BOOL _padDrag; CFTimeInterval _padTapAt;
     UIImpactFeedbackGenerator *_clickFeedback, *_rightFeedback; UISelectionFeedbackGenerator *_scrollFeedback;
 }
 
@@ -451,10 +453,11 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
 - (void)padHold:(NSTimer *)timer {
     _padTimer = nil;
     if (_pad.count != 1 || _padMoved || _padDead || _padRight) return;
-    _padRight = YES; dm_mouse_button(DM_MOUSE_RIGHT, 1);
+    _padRight = YES; _padTapAt = 0; dm_mouse_button(DM_MOUSE_RIGHT, 1);
     [_rightFeedback impactOccurred]; [_rightFeedback prepare];
 }
 - (void)padClick {
+    _padTapAt = CACurrentMediaTime();
     dm_mouse_button(DM_MOUSE_LEFT, 1);
     [_clickFeedback impactOccurredWithIntensity:0.8]; [_clickFeedback prepare];
     NSUInteger epoch = ++_lmbEpoch;
@@ -474,9 +477,16 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
         [_pad addObject:t];
         if (_pad.count == 1) {
             _padStart = _padLast = [t locationInView:self]; _padMoved = _padDead = _padRight = NO;
-            [self padCancelHold]; _padTimer = [NSTimer scheduledTimerWithTimeInterval:K_TP_HOLD target:self selector:@selector(padHold:) userInfo:nil repeats:NO];
+            [self padCancelHold];
+            if (_padTapAt > 0 && CACurrentMediaTime() - _padTapAt <= K_TP_DRAG) {
+                _padTapAt = 0; _padDrag = YES; _lmbEpoch++;
+                dm_mouse_button(DM_MOUSE_LEFT, 1);
+                [_clickFeedback impactOccurredWithIntensity:0.8]; [_clickFeedback prepare];
+            } else _padTimer = [NSTimer scheduledTimerWithTimeInterval:K_TP_HOLD target:self selector:@selector(padHold:) userInfo:nil repeats:NO];
         } else {   // the second finger: no click or hold any more, a wheel instead
             [self padCancelHold];
+            _padTapAt = 0;
+            if (_padDrag) { _padDrag = NO; dm_mouse_button(DM_MOUSE_LEFT, 0); }
             if (_padRight) { dm_mouse_button(DM_MOUSE_RIGHT, 0); _padRight = NO; }
             _padDead = YES; _padScroll = 0; _padScrollY = [self padMidY];
         }
@@ -506,7 +516,8 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
         if (![_pad containsObject:t]) continue;
         if (_pad.count == 1) {   // the last finger lifts
             [self padCancelHold];
-            if (_padRight) { dm_mouse_button(DM_MOUSE_RIGHT, 0); _padRight = NO; }
+            if (_padDrag) { _padDrag = NO; dm_mouse_button(DM_MOUSE_LEFT, 0); }
+            else if (_padRight) { dm_mouse_button(DM_MOUSE_RIGHT, 0); _padRight = NO; }
             else if (!_padMoved && !_padDead && !cancelled) [self padClick];
             _padDead = NO;
         }
@@ -518,6 +529,7 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
     for (int k = 0; k < 3; k++) if (_kbTouch[k]) { _kbTouch[k] = nil; dm_key_modifier(k_kbMask[k], 0); }
     if (_padRight) { _padRight = NO; dm_mouse_button(DM_MOUSE_RIGHT, 0); }
     if (touchscreen_mode()) { _lmbEpoch++; dm_mouse_button(DM_MOUSE_LEFT, 0); }
+    _padDrag = NO; _padTapAt = 0;
     [_pad removeAllObjects]; _padMoved = _padDead = NO;
     [self refreshKeys];
 }

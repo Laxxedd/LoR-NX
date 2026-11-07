@@ -27,9 +27,46 @@ static void screen_size(int *w, int *h) {
     *h = handheld ? 720 : 1080;
 }
 
+#define K_BUILD_ID "aeea627ddbd1214764dfef5f965e94a2"
+#define K_MANAGER_TABLE 0x54D4828u
+#define K_INPUT_MANAGER_SLOT 1u
+#define F_MOUSE_X 0xC8u
+#define F_MOUSE_Y 0xCCu
+
+static uint8_t *main_base(void) {
+    static uint8_t *base;
+    if (!base)
+        for (int i = 0; i < g_nmod; i++)
+            if (!strcmp(g_mod[i].name, "main") && !g_mod[i].nro) { base = g_mod[i].base; break; }
+    return base;
+}
+
+static void push_engine_position(float x, float y) {
+    static int build_ok = -1;
+    if (build_ok < 0) build_ok = strncmp(dm_main_build(), K_BUILD_ID, 32) == 0;
+    if (!build_ok) return;
+    uint8_t *base = main_base();
+    if (!base) return;
+    uint8_t *mgr = *(uint8_t *volatile *)(base + K_MANAGER_TABLE + 8u * K_INPUT_MANAGER_SLOT);
+    if (!mgr) return;
+    volatile float *pos = (volatile float *)(mgr + F_MOUSE_X);
+    pos[0] = x;
+    *(volatile float *)(mgr + F_MOUSE_Y) = y;
+    static int logged;
+    if (!logged++) LOG("[mod touch-ui] engine mouse position at InputManager %p fed from the touchpad", (void *)mgr);
+}
+
 static dm_mouse_frame_t frame_now(void) {
+    static uint64_t pushed = ~0ull;
+    uint64_t frame = dm_nvn_frame_count();
     dm_mouse_frame_t f;
-    dm_mouse_frame(dm_nvn_frame_count(), &f);
+    dm_mouse_frame(frame, &f);
+    if (pushed != frame) {
+        pushed = frame;
+        int w, h;
+        screen_size(&w, &h);
+        push_engine_position(f.nx * (float)(w - 1), (1.0f - f.ny) * (float)(h - 1));
+    }
     return f;
 }
 
