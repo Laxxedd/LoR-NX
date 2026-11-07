@@ -13,7 +13,7 @@
 //   Touches no control takes (in 3D, those outside the right third) go to the game's touch screen (pushGame; Super Mario Galaxy's pointer in handheld mode).
 //   The virtual gamepad (layout button included) hides while a physical controller is connected and comes back when it is removed; meanwhile every touch goes to the game. Physical controllers keep every button (D-pad and right stick included) and map by position: bottom = B, right = A, left = Y, top = X (same positions as on a Switch controller); a Nintendo pad maps by its labels (pad_apple.h).
 //   Each physical controller is a player of its own (local co-op), as on the Mac: the first one connected is player 1, together with the touch gamepad, the next player 2, and so on up to 8; see "Physical controllers" below.
-//   Touchscreen Mode (DM_TOUCHSCREEN=1) replaces all of it: the screen is a touchpad for the game's mouse (tsBegan below: one finger drags the cursor, the finger down is the left button held and lifting it the release, two fingers moving up or down scroll the wheel;
+//   Touchscreen Mode (DM_TOUCHSCREEN=1) replaces all of it: the screen is a touchpad for the game's mouse (tsBegan below: one finger drags the cursor, a tap is the left button, a hold the right button, three fingers swiping hold the left button, two fingers moving up or down scroll the wheel;
 //     (Pointer Mode Touch, DM_POINTER_MODE=touch, puts the cursor under the finger instead: tap = left click, hold 0.3 s = right button held, swipe = left button held and dragged; the touch-ui mod then hides the game's own cursor)
 //     the app draws no cursor: the game's own is moved by the mouse; the left click reaches the game as a touch-screen press at the cursor, since the touch-ui mod makes the game read the touch screen: hle_touch.c trackpad_touch) and Esc, Space, Shift, Ctrl and Alt are the keyboard's keys (front.h dm_mouse_*, dm_key_modifier, dm_key_press), placed by the launcher's touchscreen layout editor (Launcher.swift, TouchscreenLayoutEditor.swift): Esc at the top left, a thin wide Space at the bottom middle and the three modifiers at the bottom left
 //     unless the player moved them. Clicks, scroll steps and the keys give a haptic tap while DM_TOUCH_HAPTICS is on.
@@ -151,7 +151,7 @@ static const CGFloat
     K_TP_PINCH = 24,                                // two fingers moving this many points apart (together) zoom one notch in (out): the wheel, up when they spread
     K_KB_GAP = 8, K_KB_R = 6,                       // the keys' hit areas reach half this far beyond them; the corner radius of the squircle keys
     K_KB_HIT = 44;                                  // a key is at least this big to hit, however small it is drawn (the thin Space key is 4 points tall)
-static const NSTimeInterval K_TP_MIN_PRESS = 0.05;  // Trackpad pointer mode: the left button stays down at least this long, however short the touch
+static const NSTimeInterval K_TP_HOLD = 0.45;       // Trackpad pointer mode: a finger held still this long is the right button
 static const NSTimeInterval K_PT_HOLD = 0.3;         // Touch pointer mode: a finger held still this long is the right button
 static const NSTimeInterval K_PT_PARK = 0.2;        // Touch pointer mode: this long after the last finger lifts (the click is read by then) the cursor leaves the panel
 // The touchscreen keys, in the order of TouchscreenLayout.swift's TouchKey (position, size and opacity come from there: dm_ts_key_frame / dm_ts_key_opacity)
@@ -205,7 +205,8 @@ static void pads_start(void);   // Physical controllers, below
     CGFloat _padPinch, _padDist;                   // two fingers: change of their distance not yet turned into a zoom notch, their distance at the last move
     BOOL _ptHold; NSUInteger _ptParkEpoch;   // Touch pointer mode: the left button is held by a swipe; counts the cursor's parking
     NSTimer *_padTimer; NSUInteger _lmbEpoch;      // the hold timer (Touch pointer mode); counts left presses so an old release cannot let go of a newer press
-    BOOL _lmbDown; CFTimeInterval _lmbAt;          // Trackpad pointer mode: the finger holds the left button, and when it pressed it
+    BOOL _padDrag; CGPoint _padStart3;             // Trackpad pointer mode, three fingers: the swipe holds the left button; where their centre landed
+    CGPoint _padLast3;                             // ... and where it was last applied
     UIImpactFeedbackGenerator *_clickFeedback, *_rightFeedback; UISelectionFeedbackGenerator *_scrollFeedback;
 }
 
@@ -464,7 +465,7 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
 // Pointer Mode "Touch" (DM_POINTER_MODE=touch, pointer_touch) changes what one finger means, not the keys or the two-finger wheel: the cursor is put under the finger (dm_mouse_set) when it lands and follows it;
 // a tap is a left click where it landed, at once; a finger held still for K_PT_HOLD is the right button, held until it lifts; and a swipe (the finger leaving the slop first) is the left button held from where it landed and
 // dragged with the finger until it lifts. A swipe after the hold drags with the right button instead. When no finger is down the cursor is parked off the panel (dm_mouse_park), so nothing stays hovered.
-// The touches that land on a key hold it (locked at touch-down, like the gamepad's keys): a modifier or Esc / Space, placed by the touchscreen layout (TouchscreenLayout.swift); every other touch is the touchpad. One finger (Trackpad): its landing is the left button going down and its lifting the release (at least K_TP_MIN_PRESS later), and it moves the cursor, dragging, once it has left the slop. A second finger lets the button go and makes the pair a wheel: their mid point's vertical travel
+// The touches that land on a key hold it (locked at touch-down, like the gamepad's keys): a modifier or Esc / Space, placed by the touchscreen layout (TouchscreenLayout.swift); every other touch is the touchpad. One finger (Trackpad): it moves the cursor once it has left the slop; lifting it unmoved is a left click, and holding it unmoved for K_TP_HOLD presses the right button until it lifts. Three fingers swiping hold the left button and drag until one lifts. A second finger ends all of that and makes the pair a wheel: their mid point's vertical travel
 // turns into notches (down = wheel up, as dragging a page down shows what is above); their distance changing is a zoom, also the wheel (spread = wheel up), and only the one that travels further counts; the gesture stays over until every finger has lifted. Each click, each notch and each key press gives a haptic tap. A third finger does nothing.
 - (CGRect)kbRect:(int)i { return _kbFrame[i]; }
 - (int)kbAt:(CGPoint)p {   // the key whose hit area holds the point (nearest centre when two do): at least K_KB_HIT either way, and half the gap beyond that, so neighbouring hit areas touch but hardly overlap
@@ -510,19 +511,8 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
     NSUInteger epoch = ++_ptParkEpoch;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, K_PT_PARK * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ if (epoch == self->_ptParkEpoch && self->_pad.count == 0) dm_mouse_park(); });
 }
-- (void)padPressLeft {   // Trackpad pointer mode: the finger's landing is the left button going down, at once
-    _lmbEpoch++; _lmbDown = YES; _lmbAt = CACurrentMediaTime();
-    dm_mouse_button(DM_MOUSE_LEFT, 1);
-    [_clickFeedback impactOccurredWithIntensity:0.8]; [_clickFeedback prepare];
-}
-- (void)padReleaseLeft:(BOOL)now {   // its lifting is the button going up; a press shorter than K_TP_MIN_PRESS is let go that much later, so the game cannot miss it
-    if (!_lmbDown) return;
-    _lmbDown = NO;
-    NSUInteger epoch = ++_lmbEpoch;
-    CFTimeInterval wait = now ? 0 : K_TP_MIN_PRESS - (CACurrentMediaTime() - _lmbAt);
-    if (wait <= 0) { dm_mouse_button(DM_MOUSE_LEFT, 0); return; }
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(wait * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ if (epoch == self->_lmbEpoch) dm_mouse_button(DM_MOUSE_LEFT, 0); });
-}
+- (CGPoint)padCentre { CGFloat x = 0, y = 0; for (UITouch *u in _pad) { CGPoint p = [u locationInView:self]; x += p.x; y += p.y; } return CGPointMake(x / _pad.count, y / _pad.count); }
+- (void)padDragEnd { if (!_padDrag) return; _padDrag = NO; _lmbEpoch++; dm_mouse_button(DM_MOUSE_LEFT, 0); }   // fewer than three fingers: the left button goes up
 - (CGFloat)padMidY { return ([_pad[0] locationInView:self].y + [_pad[1] locationInView:self].y) / 2; }
 - (CGFloat)padDist { CGPoint a = [_pad[0] locationInView:self], b = [_pad[1] locationInView:self]; return hypot(a.x - b.x, a.y - b.y); }
 - (void)tsBegan:(NSSet<UITouch *> *)ts {
@@ -534,7 +524,7 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
             [_touchFeedback impactOccurredWithIntensity:0.6]; [_touchFeedback prepare];
             continue;
         }
-        if (_pad.count >= 2) continue;
+        if (_pad.count >= 3) continue;
         [_pad addObject:t];
         if (_pad.count == 1) {
             _padStart = _padLast = [t locationInView:self]; _padMoved = _padDead = _padRight = NO;
@@ -543,13 +533,13 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
                 _ptHold = NO; _ptParkEpoch++;
                 [self ptPlaceCursor:_padStart];
             }
-            if (pointer_touch()) _padTimer = [NSTimer scheduledTimerWithTimeInterval:K_PT_HOLD target:self selector:@selector(padHold:) userInfo:nil repeats:NO];
-            else [self padPressLeft];   // Trackpad: the first touch is the left button held down, lifting it the release
+            _padTimer = [NSTimer scheduledTimerWithTimeInterval:pointer_touch() ? K_PT_HOLD : K_TP_HOLD target:self selector:@selector(padHold:) userInfo:nil repeats:NO];
+        } else if (_pad.count == 3) {   // the third finger: a swipe now holds the left button (Trackpad)
+            [self padCancelHold]; _padDrag = NO; _padStart3 = _padLast3 = [self padCentre];
         } else {   // the second finger: no click or hold any more, a wheel instead
             [self padCancelHold];
             if (_padRight) { dm_mouse_button(DM_MOUSE_RIGHT, 0); _padRight = NO; }
             if (_ptHold) { _ptHold = NO; dm_mouse_button(DM_MOUSE_LEFT, 0); }
-            [self padReleaseLeft:YES];   // two fingers are a scroll or a zoom: the button the first one pressed is let go
             _padDead = YES; _padScroll = _padPinch = 0; _padScrollY = [self padMidY]; _padDist = [self padDist];
         }
     }
@@ -569,6 +559,17 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
         if (pointer_touch()) { [self ptPlaceCursor:p]; _padLast = p; return; }   // the cursor is under the finger
         CGFloat k = 1280.0 / [self picture].size.width * K_TP_GAIN * touchpad_speed();
         dm_mouse_move((p.x - _padLast.x) * k, (p.y - _padLast.y) * k); _padLast = p;
+    } else if (_pad.count == 3 && !pointer_touch() && ([ts containsObject:_pad[0]] || [ts containsObject:_pad[1]] || [ts containsObject:_pad[2]])) {
+        // Trackpad, three fingers: swiping (the centre leaving the slop) presses the left button, and the centre then moves the cursor, dragging; a finger lifting lets go
+        CGPoint c = [self padCentre];
+        if (!_padDrag) {
+            if (hypot(c.x - _padStart3.x, c.y - _padStart3.y) <= K_TP_SLOP) return;
+            _padDrag = YES; _lmbEpoch++; dm_mouse_button(DM_MOUSE_LEFT, 1);
+            [_clickFeedback impactOccurred]; [_clickFeedback prepare];
+            _padLast3 = c; return;
+        }
+        CGFloat k = 1280.0 / [self picture].size.width * K_TP_GAIN * touchpad_speed();
+        dm_mouse_move((c.x - _padLast3.x) * k, (c.y - _padLast3.y) * k); _padLast3 = c;
     } else if (_pad.count == 2 && ([ts containsObject:_pad[0]] || [ts containsObject:_pad[1]])) {
         // Two fingers are a scroll (their mid point moves up or down) or a zoom (they move apart or together), the same in both Pointer Modes. Both are the wheel: a pinch out is wheel up (zoom in).
         // Whichever has travelled further is the one that turns into notches, and the other's travel starts again, so a pinch whose centre drifts does not scroll and a scroll whose fingers drift does not zoom
@@ -604,18 +605,22 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
                 else if (!_padMoved && !_padDead && !cancelled) [self padClick];   // a tap
                 [self ptParkSoon];
             }
-            else [self padReleaseLeft:cancelled];   // Trackpad: lifting is the left button's release
+            else if (_padRight) { dm_mouse_button(DM_MOUSE_RIGHT, 0); _padRight = NO; }   // the hold ends
+            else if (!_padMoved && !_padDead && !cancelled) [self padClick];   // a tap
             _padDead = NO;
         }
+        if (_pad.count == 3) [self padDragEnd];   // a finger lifts from the three-finger hold
         [_pad removeObject:t];
+        if (_pad.count == 2) { _padScroll = _padPinch = 0; _padScrollY = [self padMidY]; _padDist = [self padDist]; }   // two left: a wheel again, from here
     }
 }
 - (void)tsReset {   // lets go of everything the touchpad and the keys hold
     [self padCancelHold];
     for (int k = 0; k < TS_N; k++) if (_kbTouch[k]) { _kbTouch[k] = nil; ts_key(k, 0); }
     if (_padRight) { _padRight = NO; dm_mouse_button(DM_MOUSE_RIGHT, 0); }
-    if (touchscreen_mode()) { _lmbEpoch++; _lmbDown = NO; dm_mouse_button(DM_MOUSE_LEFT, 0); }
+    if (touchscreen_mode()) { _lmbEpoch++; dm_mouse_button(DM_MOUSE_LEFT, 0); }
     if (pointer_touch()) { _ptHold = NO; dm_mouse_park(); }
+    _padDrag = NO;
     [_pad removeAllObjects]; _padMoved = _padDead = NO;
     [self refreshKeys];
 }
