@@ -44,7 +44,7 @@ A built app carries the settings its game supports, as the iPhone app's settings
 - `level` (optional): `basic` marks a setting to show first, for a front end that shows a short list and puts the rest behind a second step. Without it, the front end decides.
 - `needs` (optional): `<VAR>=<value>` makes the row a sub-setting of the row that sets `<VAR>`, drawn only while that row has that value (Pipeline prebuild only while Metal 4 pipelines is on). A row naming a variable the list does not have stays drawn.
 - `forced` (optional, a mod's switch): `<VAR>=<value>` turns the switch on and greys it out while the row that sets `<VAR>` has that value (the touch-ui mod while Touchscreen Mode is on), so it cannot be turned off until that row changes; it then stays on until the player turns it off. A row naming a variable the list does not have is never forced.
-- `unless` (optional): `<VAR>=<value>` keeps the row drawn but greyed out and unchangeable while the row that sets `<VAR>` has that value (Hold to confirm + button while Touchscreen Mode is on). A row naming a variable the list does not have stays enabled.
+- `unless` (optional): `<VAR>=<value>` hides the row while the row that sets `<VAR>` has that value (Hold to confirm + button while Touchscreen Mode is on). A row naming a variable the list does not have stays drawn.
 - `style` (optional): `segmented` asks for a `choice` row to be drawn as a segmented control instead of a menu, for two or three short options (Pointer Mode: Trackpad / Touch). A front end that has no such control draws its usual choice row.
 - An app without the file has no settings to offer: start it as it is.
 

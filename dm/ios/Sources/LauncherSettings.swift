@@ -7,7 +7,7 @@ struct Setting: Decodable, Identifiable {
     let section: String?   // heading on the settings screen; absent in older bundles
     let category: String?  // a mod's group on the iPhone's mods page (LauncherModel.modCategories); absent: Miscellaneous
     let needs: String?     // "<VAR>=<value>": a sub-setting, drawn only while that setting has that value
-    let unless: String?    // "<VAR>=<value>": drawn but greyed out and unchangeable while that setting has that value
+    let unless: String?    // "<VAR>=<value>": not drawn while that setting has that value
     let style: String?     // "segmented": a choice drawn as a segmented control instead of a menu (Pointer Mode)
     let forced: String?    // "<VAR>=<value>" (a mod's switch): turned on and greyed out while that setting has that value (touch-ui while Touchscreen Mode is on)
     let level: String?     // "basic": shown first (the Mac window's Basic settings); any other or none: Advanced settings. The iPhone keeps one list
@@ -70,20 +70,15 @@ final class LauncherModel: ObservableObject {
     // A row with "needs" is a sub-setting of the row it names: drawn only while that setting has that value, so a
     // setting that cannot do anything is not offered (an upscaler's detail with the upscaler off, rumble strength
     // with rumble off). A row naming a setting this game does not have stays drawn, as it has nothing to hide behind
+    // A row with "unless" is hidden while the setting it names has that value (the controller options while Touchscreen Mode is on)
     func visible(_ s: Setting) -> Bool {
+        if let u = s.unless, holds(u) { return false }
         guard let n = s.needs, let eq = n.firstIndex(of: "=") else { return true }
         let key = String(n[n.startIndex..<eq]), want = String(n[n.index(after: eq)...])
         guard let v = values[key] else { return true }
         return v == want
     }
-    // A row with "unless" stays on the screen, greyed out, while the setting it names has that value (the controller options while Touchscreen Mode is on)
-    func greyedOut(_ s: Setting) -> Bool {
-        if isForced(s) { return true }
-        guard let n = s.unless, let eq = n.firstIndex(of: "=") else { return false }
-        let key = String(n[n.startIndex..<eq]), want = String(n[n.index(after: eq)...])
-        guard let v = values[key] else { return false }
-        return v == want
-    }
+    func greyedOut(_ s: Setting) -> Bool { isForced(s) }
     // A row with "forced" is switched on, and kept greyed out, while the setting it names has that value (the touch-ui mod while Touchscreen Mode is on): turning that setting off frees the switch, which stays on until the player turns it off.
     // A row naming a setting this game does not have is never forced. A switch an env file or the launch environment sets is left as it is
     func isForced(_ s: Setting) -> Bool { guard let n = s.forced else { return false }; return holds(n) }

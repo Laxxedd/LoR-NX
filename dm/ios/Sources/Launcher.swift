@@ -128,7 +128,7 @@ private struct LauncherView: View {
     private static let modsPage = "mods"   // not a DM_ name, so never a mod's env
 
     // Opens the layout editor of the Swipe touch layout (GestureLayoutEditor.swift).
-    // Touchscreen Mode hides the swipe gamepad, so the button stays but is greyed out
+    // Touchscreen Mode hides the swipe gamepad, so the button is not drawn while it is on
     private var swipeEditorButton: some View {
         Button { layoutEditor = .swipe } label: {
             HStack {
@@ -137,10 +137,9 @@ private struct LauncherView: View {
                 Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
             }
         }
-        .disabled(m.values["DM_TOUCHSCREEN"] == "1")
     }
 
-    // Opens the layout editor of Touchscreen Mode's keys (TouchscreenLayoutEditor.swift). The keys exist only in that mode, so the button is greyed out while it is off
+    // Opens the layout editor of Touchscreen Mode's keys (TouchscreenLayoutEditor.swift). The keys exist only in that mode, so the button is not drawn while it is off
     private var touchscreenEditorButton: some View {
         Button { layoutEditor = .touchscreen } label: {
             HStack {
@@ -149,12 +148,10 @@ private struct LauncherView: View {
                 Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
             }
         }
-        .disabled(m.values["DM_TOUCHSCREEN"] != "1")
     }
 
     @ViewBuilder private var layoutEditorButtons: some View {
-        swipeEditorButton
-        touchscreenEditorButton
+        if m.values["DM_TOUCHSCREEN"] == "1" { touchscreenEditorButton } else { swipeEditorButton }
     }
 
     // The Mods section is one button: the mods themselves, grouped by category, are on the page it opens (ModsBrowserPage)
