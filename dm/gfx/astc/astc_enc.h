@@ -7,6 +7,9 @@
 #define ASTC_ENC_QUALITY_FASTEST 0.0f
 #define ASTC_ENC_QUALITY_FAST 10.0f
 #define ASTC_ENC_QUALITY_MEDIUM 60.0f
+#define ASTC_ENC_QUALITY_THOROUGH 98.0f
+#define ASTC_ENC_QUALITY_VERYTHOROUGH 99.0f
+#define ASTC_ENC_QUALITY_EXHAUSTIVE 100.0f   // astcenc's highest preset (ASTCENC_PRE_EXHAUSTIVE)
 
 typedef struct astc_enc astc_enc_t;
 

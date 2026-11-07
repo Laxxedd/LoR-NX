@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>   // strcasecmp
 #include <unistd.h>
 
 #include "astc_cache.h"
@@ -19,8 +20,26 @@
 #ifndef DM_ASTCENC_TAG
 #define DM_ASTCENC_TAG "unknown"
 #endif
-#define NVN_BC_ASTC_CACHE_SALT "dm-bc-astc-1;astcenc=" DM_ASTCENC_TAG ";quality=medium60;ldr4x4"
+#define NVN_BC_ASTC_CACHE_SALT_FMT "dm-bc-astc-1;astcenc=" DM_ASTCENC_TAG ";quality=%g;ldr4x4"   // the quality actually used (g_quality) is part of the key: another quality finds nothing of an older one
 #define CACHE_MIN_PIXELS (64u * 64u)   // smaller images encode faster than a file can be found and read
+
+#ifdef DM_HAVE_ASTCENC
+// Encode quality (0..100, astcenc's scale): the balance of texture quality and encode speed. Default: thorough (98), which is close to exhaustive in the result and a good deal faster.
+// DM_NVN_BC_ASTC_QUALITY overrides it: fastest | fast | medium | thorough | verythorough | exhaustive, or a number from 0 to 100 (a bad value is ignored). Read by nvn_bc_astc_init.
+static float g_quality = ASTC_ENC_QUALITY_THOROUGH;
+static float parse_quality(const char *s, float fallback) {
+    static const struct { const char *name; float q; } names[] = {
+        {"fastest", ASTC_ENC_QUALITY_FASTEST}, {"fast", ASTC_ENC_QUALITY_FAST}, {"medium", ASTC_ENC_QUALITY_MEDIUM},
+        {"thorough", ASTC_ENC_QUALITY_THOROUGH}, {"verythorough", ASTC_ENC_QUALITY_VERYTHOROUGH}, {"exhaustive", ASTC_ENC_QUALITY_EXHAUSTIVE},
+    };
+    if (!s || !*s) return fallback;
+    for (size_t i = 0; i < sizeof names / sizeof *names; i++) if (!strcasecmp(s, names[i].name)) return names[i].q;
+    char *end = NULL;
+    double v = strtod(s, &end);
+    if (end == s || *end || v < 0 || v > 100) return fallback;
+    return (float)v;
+}
+#endif
 
 static atomic_int g_active;
 static atomic_uint g_threads = 1;   // encoder threads for one large image (nvn_bc_astc_init)
@@ -31,6 +50,7 @@ int nvn_bc_astc_init(void) {
 #ifdef DM_HAVE_ASTCENC
     const char *e = getenv("DM_NVN_BC_ASTC");
     on = !e || atoi(e) != 0;
+    g_quality = parse_quality(getenv("DM_NVN_BC_ASTC_QUALITY"), ASTC_ENC_QUALITY_THOROUGH);
     // DM_NVN_BC_ASTC_THREADS: threads for one large image; unset = the CPU count, at most 6 (an iPhone has 2 fast and 4 efficiency cores); 0 or 1 = the calling thread only
     long n = sysconf(_SC_NPROCESSORS_ONLN); if (n > 6) n = 6;
     const char *t = getenv("DM_NVN_BC_ASTC_THREADS");
@@ -44,7 +64,8 @@ int nvn_bc_astc_init(void) {
         if (c && *c) { if (strcmp(c, "0")) snprintf(dir, sizeof dir, "%s", c); }
         else if (tmp && *tmp) snprintf(dir, sizeof dir, "%s_astc", tmp);
         long m = mb && *mb ? atol(mb) : 2048;
-        if (*dir && m > 0) astc_cache_open(dir, (uint64_t)m << 20, NVN_BC_ASTC_CACHE_SALT);
+        char salt[128]; snprintf(salt, sizeof salt, NVN_BC_ASTC_CACHE_SALT_FMT, (double)g_quality);
+        if (*dir && m > 0) astc_cache_open(dir, (uint64_t)m << 20, salt);
     }
 #endif
     atomic_store(&g_active, on);
@@ -54,6 +75,11 @@ int nvn_bc_astc_init(void) {
 
 int nvn_bc_astc_active(void) { return atomic_load(&g_active); }
 unsigned nvn_bc_astc_threads(void) { return atomic_load(&g_threads); }
+#ifdef DM_HAVE_ASTCENC
+float nvn_bc_astc_quality(void) { return g_quality; }
+#else
+float nvn_bc_astc_quality(void) { return 0; }
+#endif
 int nvn_bc_astc_covers(int f) { return atomic_load(&g_active) && nvn_fmt_bcn(f, NULL); }
 size_t nvn_bc_astc_size(unsigned w, unsigned h) { return (size_t)((w + 3) / 4) * ((h + 3) / 4) * 16; }
 
@@ -88,23 +114,25 @@ static int snorm_image(int fmt, const uint8_t *bc, size_t bc_len, unsigned w, un
 }
 
 #ifdef DM_HAVE_ASTCENC
-// One encoder per thread and profile (LDR / sRGB), made on first use at the medium quality (the choice is part of the on-disk cache's key, see the plan: stage 5). A thread's encoders live as long as the thread.
+// One encoder per thread and profile (LDR / sRGB), made on first use at g_quality (the choice is part of the on-disk cache's key, see the plan: stage 5). A thread's encoders live as long as the thread.
 static _Thread_local astc_enc_t *tl_enc[2];
+static _Thread_local float tl_q[2];   // the quality each tl_enc was made with
 // The multi-threaded encoders (LDR / sRGB), one image at a time (a context takes a single image): the first large image to find the lock free uses them, one that finds it taken is encoded on its own thread
 static pthread_mutex_t g_mt_lock = PTHREAD_MUTEX_INITIALIZER;
-static astc_enc_t *g_mt_enc[2]; static unsigned g_mt_n;
+static astc_enc_t *g_mt_enc[2]; static unsigned g_mt_n; static float g_mt_q;
 static int encode(int srgb, const uint8_t *rgba, unsigned w, unsigned h, uint8_t *astc, size_t astc_len) {
     unsigned thr = atomic_load(&g_threads);
     if (thr > 1 && (size_t)w * h >= MT_MIN_PIXELS && pthread_mutex_trylock(&g_mt_lock) == 0) {
-        if (g_mt_n != thr) { for (int i = 0; i < 2; i++) { astc_enc_free(g_mt_enc[i]); g_mt_enc[i] = NULL; } g_mt_n = thr; }   // the switch changed (tests)
-        if (!g_mt_enc[srgb != 0]) g_mt_enc[srgb != 0] = astc_enc_new_mt(srgb, ASTC_ENC_QUALITY_MEDIUM, thr);
+        if (g_mt_n != thr || g_mt_q != g_quality) { for (int i = 0; i < 2; i++) { astc_enc_free(g_mt_enc[i]); g_mt_enc[i] = NULL; } g_mt_n = thr; g_mt_q = g_quality; }   // the switch or the quality changed (tests)
+        if (!g_mt_enc[srgb != 0]) g_mt_enc[srgb != 0] = astc_enc_new_mt(srgb, g_quality, thr);
         astc_enc_t *m = g_mt_enc[srgb != 0];
         int rc = m ? astc_enc_rgba8_4x4_mt(m, rgba, w, h, astc, astc_len) : -2;
         pthread_mutex_unlock(&g_mt_lock);
         if (rc != -2) return rc;   // -2: the shared encoder could not be made: the calling thread's own below
     }
     astc_enc_t **e = &tl_enc[srgb != 0];
-    if (!*e && !(*e = astc_enc_new(srgb, ASTC_ENC_QUALITY_MEDIUM, NULL))) return -1;
+    if (*e && tl_q[srgb != 0] != g_quality) { astc_enc_free(*e); *e = NULL; }   // this thread's encoder is of another quality (init ran again)
+    if (!*e) { if (!(*e = astc_enc_new(srgb, g_quality, NULL))) return -1; tl_q[srgb != 0] = g_quality; }
     return astc_enc_rgba8_4x4(*e, rgba, w, h, astc, astc_len);
 }
 #endif

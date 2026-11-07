@@ -473,7 +473,7 @@ void mtl_init(void) {
     if (!g_nvn_deswz_gpu) MLOG("[RED] GPU deswizzle init failed; swizzled textures fall back to the CPU");
     // BC1 / BC2 / BC3 / BC7 textures are transcoded to ASTC 4x4 on every device (dm/gfx/tex/README.md): the format table maps them to ASTC from here on, so this comes before the first texture.
     // DM_NVN_BC_ASTC=0 keeps them BC (BC6H always is, until its stage)
-    if (nvn_bc_astc_init()) MLOG("BC1 / BC2 / BC3 / BC7 and BC4 / BC5 textures are transcoded (ASTC 4x4 with astcenc, medium quality, %u thread(s) for a large image; signed BC4 / BC5 to R8Snorm / RG8Snorm); DM_NVN_BC_ASTC=0 turns it off", nvn_bc_astc_threads());
+    if (nvn_bc_astc_init()) MLOG("BC1 / BC2 / BC3 / BC7 and BC4 / BC5 textures are transcoded (ASTC 4x4 with astcenc, quality %g (DM_NVN_BC_ASTC_QUALITY: 98 thorough, 100 exhaustive), %u thread(s) for a large image; signed BC4 / BC5 to R8Snorm / RG8Snorm); DM_NVN_BC_ASTC=0 turns it off", (double)nvn_bc_astc_quality(), nvn_bc_astc_threads());
     else MLOG("BC textures stay BC (%s)", getenv("DM_NVN_BC_ASTC") ? "DM_NVN_BC_ASTC=0" : "this host was built without astcenc");
     if (!g_dev.supportsBCTextureCompression) {   // (MLOG pastes its format after a literal, so each message is a literal of its own)
         if (nvn_bc_astc_active()) MLOG("[RED] Metal device %s has no BC texture formats: BC6H textures (not transcoded) are refused, the rest are transcoded to ASTC", g_dev.name.UTF8String);

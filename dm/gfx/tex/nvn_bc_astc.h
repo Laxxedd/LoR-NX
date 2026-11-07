@@ -10,6 +10,8 @@ int nvn_bc_astc_init(void);
 int nvn_bc_astc_active(void);
 // Threads one large image (128×128 and up) is encoded on: DM_NVN_BC_ASTC_THREADS, else the CPU count up to 6; 1 = the calling thread only. Read by nvn_bc_astc_init.
 unsigned nvn_bc_astc_threads(void);
+// The encode quality in use, 0..100 on astcenc's scale (default 98, thorough; DM_NVN_BC_ASTC_QUALITY overrides, read by nvn_bc_astc_init); 0 when the host is built without astcenc.
+float nvn_bc_astc_quality(void);
 
 // 1 when the transcode is on and covers this NVN format (BC1 / BC2 / BC3 / BC7, sRGB or not; unsigned BC4 / BC5 as ASTC 4x4; signed BC4 / BC5 as R8Snorm / RG8Snorm, which need no astcenc to convert but are switched with the rest)
 int nvn_bc_astc_covers(int nvn_format);
