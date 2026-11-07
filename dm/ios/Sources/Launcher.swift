@@ -13,10 +13,11 @@ private func info(_ key: String) -> Any? { Bundle.main.object(forInfoDictionaryK
 /// Cloud saves: an iCloud Drive folder shared with the Mac app (chosen in its settings window's
 /// Cloud saves too). The host brings the save in from there when the game starts and
 /// sends it there after each save (dm/host/save_sync.h); the folder is a bookmark (CloudSaves.m).
+/// The folder picker is presented with UIKit from the top view controller, not as a SwiftUI .sheet on a row of the list: a sheet on a List row is dismissed by SwiftUI
+/// whenever the list is rebuilt (the launcher re-renders every few seconds), which closed the picker about a second after it opened.
 private struct CloudSavesSection: View {
     @State private var folder: String = ""
     @State private var note: String = ""
-    @State private var picking = false
 
     var body: some View {
         Section {
@@ -26,7 +27,7 @@ private struct CloudSavesSection: View {
                 Text(folder.isEmpty ? "Off" : (folder as NSString).lastPathComponent)
                     .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
             }
-            Button(folder.isEmpty ? "Choose a folder in iCloud Drive…" : "Choose a different folder…") { picking = true }
+            Button(folder.isEmpty ? "Choose a folder in iCloud Drive…" : "Choose a different folder…") { pickFolder() }
             if !folder.isEmpty {
                 Button("Turn off cloud saves", role: .destructive) {
                     dm_clear_cloud_saves(); refresh(); note = ""
@@ -36,17 +37,6 @@ private struct CloudSavesSection: View {
             Text(note.isEmpty
                  ? "Choose a folder in iCloud Drive, and the same one in the Mac app's Cloud saves. The save comes in when the game starts and goes out after each save; a save that is replaced is kept in save-backups."
                  : note)
-        }
-        .sheet(isPresented: $picking) {
-            DocumentPicker(types: [.folder]) { url in
-                picking = false
-                if dm_store_cloud_saves(url) {
-                    note = "Saved. The game uses this folder when you press Play."
-                    refresh()
-                } else {
-                    note = "That folder could not be remembered — try a different one."
-                }
-            } onCancel: { picking = false }
         }
         .onAppear(perform: refresh)
     }
@@ -58,36 +48,64 @@ private struct CloudSavesSection: View {
             note = "The folder you chose before is no longer readable (the app was signed differently). Please choose it again."
         }
     }
+
+    private func pickFolder() {
+        guard !FolderPicker.isShowing else { return }
+        guard let top = FolderPicker.topViewController() else {
+            note = "The folder picker could not be opened."
+            fputs("launcher: cloud saves: no view controller to present the folder picker from\n", stderr)
+            return
+        }
+        FolderPicker.present(from: top) { url in
+            guard let url else { return }   // cancelled
+            if dm_store_cloud_saves(url) {
+                note = "Saved. The game uses this folder when you press Play."
+                refresh()
+            } else {
+                note = "That folder could not be remembered — try a different one."
+            }
+        }
+    }
 }
 
-/// UIDocumentPickerViewController for a folder, in the two callbacks a SwiftUI sheet wants.
-private struct DocumentPicker: UIViewControllerRepresentable {
-    var types: [UTType] = [.folder]
-    let onPick: (URL) -> Void
-    let onCancel: () -> Void
+/// UIDocumentPickerViewController for a folder, presented from UIKit. `done` gets the folder, or nil when the picker was cancelled; always on the main thread, once.
+private enum FolderPicker {
+    private static weak var current: UIDocumentPickerViewController?
+    /// True while the picker is on screen (a picker the system took away without a callback does not count, so the button never stays dead).
+    static var isShowing: Bool { current?.presentingViewController != nil }
 
-    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        // .open (not .import): the folder stays where it is and the bookmark keeps pointing at it.
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: false)
-        picker.allowsMultipleSelection = false
-        picker.delegate = context.coordinator
-        return picker
+    static func topViewController() -> UIViewController? {
+        let windows = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap { $0.windows }
+        var top = (windows.first { $0.isKeyWindow } ?? windows.first)?.rootViewController
+        while let next = top?.presentedViewController, !next.isBeingDismissed { top = next }
+        return top
     }
 
-    func updateUIViewController(_ vc: UIDocumentPickerViewController, context: Context) {}
+    static func present(from top: UIViewController, done: @escaping (URL?) -> Void) {
+        // .open (not .import): the folder stays where it is and the bookmark keeps pointing at it.
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder], asCopy: false)
+        picker.allowsMultipleSelection = false
+        let delegate = Delegate(done: done)
+        picker.delegate = delegate
+        objc_setAssociatedObject(picker, &delegateKey, delegate, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)   // the picker's delegate is weak: the picker keeps it alive
+        current = picker
+        fputs("launcher: cloud saves: folder picker opening\n", stderr)
+        top.present(picker, animated: true)
+    }
 
-    func makeCoordinator() -> Coordinator { Coordinator(onPick: onPick, onCancel: onCancel) }
+    private static var delegateKey: UInt8 = 0
 
-    final class Coordinator: NSObject, UIDocumentPickerDelegate {
-        let onPick: (URL) -> Void
-        let onCancel: () -> Void
-        init(onPick: @escaping (URL) -> Void, onCancel: @escaping () -> Void) {
-            self.onPick = onPick; self.onCancel = onCancel
-        }
+    private final class Delegate: NSObject, UIDocumentPickerDelegate {
+        let done: (URL?) -> Void
+        init(done: @escaping (URL?) -> Void) { self.done = done }
         func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-            if let url = urls.first { onPick(url) } else { onCancel() }
+            fputs("launcher: cloud saves: folder picked (\(urls.count))\n", stderr)
+            done(urls.first)
         }
-        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { onCancel() }
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            fputs("launcher: cloud saves: folder picker cancelled\n", stderr)
+            done(nil)
+        }
     }
 }
 
@@ -257,7 +275,7 @@ private struct LauncherView: View {
         }
         .task {
             while !Task.isCancelled {
-                memory = os_proc_available_memory()
+                if !FolderPicker.isShowing { memory = os_proc_available_memory() }   // no re-render of the launcher under the folder picker
                 try? await Task.sleep(for: .seconds(2))
             }
         }
