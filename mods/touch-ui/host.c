@@ -66,6 +66,13 @@ static dm_mouse_frame_t frame_now(void) {
         int w, h;
         screen_size(&w, &h);
         push_engine_position(f.nx * (float)(w - 1), (1.0f - f.ny) * (float)(h - 1));
+        static uint32_t last_held;
+        static int logged_changes;
+        if (f.held != last_held && logged_changes < 200) {
+            logged_changes++;
+            LOG("[mod touch-ui] frame %llu buttons held %#x down %#x up %#x at (%.0f,%.0f)", (unsigned long long)frame, f.held, f.down, f.up, f.nx * (float)(w - 1), (1.0f - f.ny) * (float)(h - 1));
+        }
+        last_held = f.held;
     }
     return f;
 }
