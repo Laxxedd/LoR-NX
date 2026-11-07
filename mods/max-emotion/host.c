@@ -7,7 +7,7 @@
 // the list short, CheckLevelUp returns 0 and the unit is left alone, so the loop of ticks never spins on it. At the maximum level (_maximumEmotionLevel) nothing is done.
 // Every level of a unit adds one to its skillPoint, as in a normal battle, so the round end (RoundEndPhase_ChoiceEmotionCard) offers one emotion card per level, the game's way of choosing what the levels give.
 // A level every 6th fixed step while the button is held (about 0.12 s) keeps the level-up effects of one unit from stacking in a single frame; the five levels take about 0.6 s.
-// Not touched: units of other factions, units that are dead or knocked out, and every phase other than planning (the held button is checked again at each fixed step, so holding it into the planning phase works).
+// Not touched: every phase other than planning (the held button is checked again at each fixed step, so holding it into the planning phase works).
 // Off by default: DM_MOD_MAXEMOTION=1 turns the callback on (the launcher's Mods > Max Emotion switch, or env.txt). The gate is always in the code and passes through while it is off.
 #include "dm.h"
 #include "dm_input.h"
@@ -42,9 +42,9 @@ void dm_mod_gate_run(uint64_t *regs, int param, void (*fn)(uint64_t *, int));
 
 static uint8_t *s_main;
 static unsigned s_tick;
-static int g_hits, g_dbg, s_last_phase = -1, s_was_held;
+static int g_tick_logs, g_hits, g_dbg, s_last_phase = -1, s_was_held;
 static int first_hits(void) { return g_hits++ < 8; }
-static int dbg_hits(void) { return g_dbg++ < 40; }
+static int dbg_hits(void) { return g_dbg++ < 60; }
 
 static uint8_t *main_base(void) {
     if (!s_main)
@@ -85,10 +85,11 @@ static void level_run(uint64_t *r, int param) {
     if (!main_base()) return;
     void *manager = FN(RVA_BATTLEOBJMGR_GET_INSTANCE, void *, const void *)(NULL);
     void *units = manager ? FN(RVA_BATTLEOBJMGR_GET_ALIVE_LIST, void *, void *, int, const void *)(manager, FACTION_PLAYER, NULL) : NULL;
-    if (dbg_hits()) LOG("[mod max-emotion] tick: manager %#llx, %d living librarian(s)", (unsigned long long)(uintptr_t)manager, list_count(units));
+    if (g_tick_logs++ < 3) LOG("[mod max-emotion] tick: manager %#llx, %d living librarian(s)", (unsigned long long)(uintptr_t)manager, list_count(units));
     for (int i = 0, n = list_count(units); i < n; i++) {
         void *unit = list_get(units, i);
-        if (!unit || field_int(unit, F_UNIT_FACTION) != FACTION_PLAYER || field_bool(unit, F_UNIT_DISPOSED) || field_bool(unit, F_BASE_DEAD_REAL) || field_bool(unit, F_BASE_KNOCKOUT)) continue;
+        if (!unit) continue;
+        if (dbg_hits()) LOG("[mod max-emotion] unit %#llx: faction %d, disposed %d, dead %d, knockout %d", (unsigned long long)(uintptr_t)unit, field_int(unit, F_UNIT_FACTION), field_bool(unit, F_UNIT_DISPOSED), field_bool(unit, F_BASE_DEAD_REAL), field_bool(unit, F_BASE_KNOCKOUT));
         if (level_up_once(unit) && first_hits())
             LOG("[mod max-emotion] unit %#llx is at emotion level %d", (unsigned long long)(uintptr_t)unit, field_int(FN(RVA_UNIT_GET_EMOTION_DETAIL, void *, void *, const void *)(unit, NULL), F_EMO_LEVEL));
     }
