@@ -151,7 +151,7 @@ static const CGFloat
     K_KB_GAP = 8, K_KB_R = 8,                       // the keys' hit areas reach half this far beyond them; the corner radius of the squircle keys
     K_KB_HIT = 44;                                  // a key is at least this big to hit, however small it is drawn (the thin Space key is 4 points tall)
 static const NSTimeInterval K_TP_HOLD = 0.45;       // a finger held still this long is the right button (Touch pointer mode: the left button, held)
-static const NSTimeInterval K_PT_DOUBLE = 0.28;     // Touch pointer mode: a second tap this soon after a first makes a double tap (right click); a lone tap waits this long before it is a left click
+static const NSTimeInterval K_PT_DOUBLE = 0.30;     // Touch pointer mode: a tap this soon after a tap (and close to it) is a double tap: its lift adds a right click to the left click the first tap already made
 static const CGFloat K_PT_DOUBLE_DIST = 36;         // ... and this close (points) to the first
 // The touchscreen keys, in the order of TouchscreenLayout.swift's TouchKey (position, size and opacity come from there: dm_ts_key_frame / dm_ts_key_opacity)
 enum { TS_SHIFT, TS_CTRL, TS_ALT, TS_ESC, TS_SPACE, TS_N };
@@ -201,7 +201,7 @@ static void pads_start(void);   // Physical controllers, below
     NSMutableArray<UITouch *> *_pad;               // the fingers on the touchpad in the order they landed (the first two count)
     CGPoint _padStart, _padLast; BOOL _padMoved, _padDead, _padRight;   // one finger: where it landed / was last applied, moved past the slop, the gesture is over (two fingers were down: nothing more until all lift), the right button is held
     CGFloat _padScroll, _padScrollY;               // two fingers: vertical travel not yet turned into a notch, their mid point's last y
-    BOOL _ptHold, _ptSecond, _ptPending; CGPoint _ptPendingAt; NSTimer *_ptClickTimer; NSUInteger _rmbEpoch;   // Touch pointer mode: the left button is held by a hold, the finger down is a double tap's second tap, a tap waits for a second one (and where), the timer that sends it, counts right clicks like _lmbEpoch
+    BOOL _ptHold, _ptSecond, _ptPending; CGPoint _ptPendingAt; CFTimeInterval _ptTapTime; NSUInteger _rmbEpoch;   // Touch pointer mode: the left button is held by a hold, the finger down is a double tap's second tap, a tap just made (where, when) that a second tap may follow, counts right clicks like _lmbEpoch
     NSTimer *_padTimer; NSUInteger _lmbEpoch;      // the hold timer; counts left clicks so an old release cannot let go of a newer press
     UIImpactFeedbackGenerator *_clickFeedback, *_rightFeedback; UISelectionFeedbackGenerator *_scrollFeedback;
 }
@@ -458,7 +458,7 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
 
 // ---- Touchscreen Mode: touchpad and keyboard ----
 // Pointer Mode "Touch" (DM_POINTER_MODE=touch, pointer_touch) changes what one finger means, not the keys or the two-finger wheel: the cursor is put under the finger (dm_mouse_set) when it lands and follows it,
-// a tap is a left click where it landed, a second tap soon after and close to the first (K_PT_DOUBLE, K_PT_DOUBLE_DIST) is a right click instead (so a lone tap is sent K_PT_DOUBLE late, once no second tap can come),
+// a tap is a left click where it landed, at once (no wait for a second tap), and a second tap soon after and close to the first (K_PT_DOUBLE, K_PT_DOUBLE_DIST) adds a right click: a double tap is a left click followed by a right click,
 // and a finger held still for K_TP_HOLD holds the left button until it lifts (moving on then drags). A finger that moves before the hold clicks nothing.
 // The touches that land on a key hold it (locked at touch-down, like the gamepad's keys): a modifier or Esc / Space, placed by the touchscreen layout (TouchscreenLayout.swift); every other touch is the touchpad. One finger: it drags the cursor once it has left the slop;
 // lifting it unmoved is a left click, and holding it unmoved for K_TP_HOLD presses the right button until it lifts (moving on then drags with it). A second finger ends all of that and makes the pair a wheel: their mid point's vertical travel
@@ -508,15 +508,6 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
     return CGPointMake(MIN(MAX(x, 0), 1279), MIN(MAX(y, 0), 719));
 }
 - (void)ptPlaceCursor:(CGPoint)p { CGPoint q = [self panelPoint:p]; dm_mouse_set((float)q.x, (float)q.y); }
-- (void)ptCancelClick { [_ptClickTimer invalidate]; _ptClickTimer = nil; }
-- (void)ptSendPending {   // no second tap came (or another touch came first): the tap is a left click where it landed
-    [self ptCancelClick];
-    if (!_ptPending) return;
-    _ptPending = NO;
-    [self ptPlaceCursor:_ptPendingAt];
-    [self padClick];
-}
-- (void)ptClickTimerFired:(NSTimer *)timer { _ptClickTimer = nil; [self ptSendPending]; }
 - (void)padRightClick {
     dm_mouse_button(DM_MOUSE_RIGHT, 1);
     [_rightFeedback impactOccurred]; [_rightFeedback prepare];
@@ -540,11 +531,9 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
             [self padCancelHold];
             if (pointer_touch()) {
                 _ptHold = _ptSecond = NO;
-                BOOL flushed = NO;
-                if (_ptPending && hypot(_padStart.x - _ptPendingAt.x, _padStart.y - _ptPendingAt.y) <= K_PT_DOUBLE_DIST) { [self ptCancelClick]; _ptPending = NO; _ptSecond = YES; }   // the second tap of a double tap
-                else if (_ptPending) { [self ptSendPending]; flushed = YES; }   // a tap elsewhere: the first one is a click now, then the cursor goes to the new finger
-                if (flushed) dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ if (self->_pad.count >= 1) [self ptPlaceCursor:[self->_pad[0] locationInView:self]]; });   // after the press has been read at the old place
-                else [self ptPlaceCursor:_padStart];
+                if (_ptPending && CACurrentMediaTime() - _ptTapTime <= K_PT_DOUBLE && hypot(_padStart.x - _ptPendingAt.x, _padStart.y - _ptPendingAt.y) <= K_PT_DOUBLE_DIST) _ptSecond = YES;   // the second tap of a double tap
+                _ptPending = NO;
+                [self ptPlaceCursor:_padStart];
             }
             _padTimer = [NSTimer scheduledTimerWithTimeInterval:K_TP_HOLD target:self selector:@selector(padHold:) userInfo:nil repeats:NO];
         } else {   // the second finger: no click or hold any more, a wheel instead
@@ -584,12 +573,8 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
             if (pointer_touch()) {
                 if (_ptHold) { _ptHold = NO; dm_mouse_button(DM_MOUSE_LEFT, 0); }
                 else if (!_padMoved && !_padDead && !cancelled) {
-                    if (_ptSecond) [self padRightClick];   // the double tap
-                    else {   // a tap: a left click unless a second one follows soon
-                        _ptPending = YES; _ptPendingAt = _padStart;
-                        [self ptCancelClick];
-                        _ptClickTimer = [NSTimer scheduledTimerWithTimeInterval:K_PT_DOUBLE target:self selector:@selector(ptClickTimerFired:) userInfo:nil repeats:NO];
-                    }
+                    if (_ptSecond) [self padRightClick];   // the double tap: a right click on top of the left click its first tap made
+                    else { [self padClick]; _ptPending = YES; _ptPendingAt = _padStart; _ptTapTime = CACurrentMediaTime(); }   // a tap: a left click at once
                 }
                 _ptSecond = NO;
             }
@@ -605,7 +590,7 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
     for (int k = 0; k < TS_N; k++) if (_kbTouch[k]) { _kbTouch[k] = nil; ts_key(k, 0); }
     if (_padRight) { _padRight = NO; dm_mouse_button(DM_MOUSE_RIGHT, 0); }
     if (touchscreen_mode()) { _lmbEpoch++; dm_mouse_button(DM_MOUSE_LEFT, 0); }
-    if (pointer_touch()) { [self ptCancelClick]; _ptPending = _ptHold = _ptSecond = NO; _rmbEpoch++; dm_mouse_button(DM_MOUSE_RIGHT, 0); }
+    if (pointer_touch()) { _ptPending = _ptHold = _ptSecond = NO; _rmbEpoch++; dm_mouse_button(DM_MOUSE_RIGHT, 0); }
     [_pad removeAllObjects]; _padMoved = _padDead = NO;
     [self refreshKeys];
 }
