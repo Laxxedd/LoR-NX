@@ -9,7 +9,8 @@ struct Setting: Decodable, Identifiable {
     let needs: String?     // "<VAR>=<value>": a sub-setting, drawn only while that setting has that value
     let unless: String?    // "<VAR>=<value>": not drawn while that setting has that value
     let style: String?     // "segmented": a choice drawn as a segmented control instead of a menu (Pointer Mode)
-    let forced: String?    // "<VAR>=<value>" (a mod's switch): turned on and greyed out while that setting has that value (touch-ui while Touchscreen Mode is on)
+    let forced: String?    // "<VAR>=<value>" (a mod's switch): the switch follows that setting, on while it has that value and off otherwise, and is not offered on the mods page (touch-ui follows Touchscreen Mode)
+    let optionNotes: [String: String]?   // choice: the line under the label for each chosen value (Pointer Mode); a value without one shows note
     let level: String?     // "basic": shown first (the Mac window's Basic settings); any other or none: Advanced settings. The iPhone keeps one list
     let base: Base?        // render scale: the 3D views' size at 1.0, docked and handheld, for the size in pixels (the Mac window)
     struct Base: Decodable { let docked, handheld: [Int] }
@@ -18,6 +19,7 @@ struct Setting: Decodable, Identifiable {
     let on, off: String?   // toggle: the values the variable takes (1 / 0 when not given)
     let format: String?    // range: "multiplier" shows the value as x1.25 instead of a percentage
     var id: String { env }
+    func noteText(_ v: String) -> String { optionNotes?[v] ?? note }   // the line under the label while v is chosen
     var sectionTitle: String { section ?? "Game" }
     var basic: Bool { level == "basic" }
     var onValue: String { on ?? "1" }
@@ -35,7 +37,7 @@ struct Setting: Decodable, Identifiable {
         default: return true
         }
     }
-    enum CodingKeys: String, CodingKey { case env, kind, label, note, def = "default", section, category, needs, unless, style, forced, level, base, options, min, max, step, on, off, format }
+    enum CodingKeys: String, CodingKey { case env, kind, label, note, def = "default", section, category, needs, unless, style, forced, optionNotes = "option_notes", level, base, options, min, max, step, on, off, format }
 }
 struct SettingsFile: Decodable { let settings: [Setting] }
 
@@ -44,7 +46,7 @@ final class LauncherModel: ObservableObject {
     let fixed: Set<String>      // set by an env file or by the launch environment: shown, not changed
     let fromLaunch: Set<String>   // of those, the ones the launch environment set (a front end's launch overrides, Xcode; DM_ENV_LAUNCH_KEYS from launcher.c or main.m)
     let ignoreSaved: Bool   // DM_SAVED_CHOICES=0: start from the defaults, and leave the saved choices as they are
-    @Published var values: [String: String] = [:] { didSet { enforce() } }   // a switch a setting forces on (Setting.forced) follows that setting at once, whichever row changed
+    @Published var values: [String: String] = [:] { didSet { enforce() } }   // a switch that follows a setting (Setting.forced) changes with that setting at once, whichever row changed
 
     private let defaults: UserDefaults
 
@@ -72,6 +74,7 @@ final class LauncherModel: ObservableObject {
     // with rumble off). A row naming a setting this game does not have stays drawn, as it has nothing to hide behind
     // A row with "unless" is hidden while the setting it names has that value (the controller options while Touchscreen Mode is on)
     func visible(_ s: Setting) -> Bool {
+        if isManaged(s) { return false }   // a switch that follows a setting is not the player's to flip: it is not on the mods page
         if let u = s.unless, holds(u) { return false }
         guard let n = s.needs, let eq = n.firstIndex(of: "=") else { return true }
         let key = String(n[n.startIndex..<eq]), want = String(n[n.index(after: eq)...])
@@ -79,8 +82,14 @@ final class LauncherModel: ObservableObject {
         return v == want
     }
     func greyedOut(_ s: Setting) -> Bool { isForced(s) }
-    // A row with "forced" is switched on, and kept greyed out, while the setting it names has that value (the touch-ui mod while Touchscreen Mode is on): turning that setting off frees the switch, which stays on until the player turns it off.
-    // A row naming a setting this game does not have is never forced. A switch an env file or the launch environment sets is left as it is
+    // A row with "forced" follows the setting it names (the touch-ui mod follows Touchscreen Mode): it is switched on while that setting has that value and off as soon as it does not, and it is not drawn,
+    // so the mods page never offers it. A row naming a setting this game does not have is not managed: it is drawn and the player's own switch.
+    // A switch an env file or the launch environment sets is left as it is (and drawn, greyed out, as any fixed row)
+    func isManaged(_ s: Setting) -> Bool {
+        guard let n = s.forced, !fixed.contains(s.env), let eq = n.firstIndex(of: "=") else { return false }
+        let key = String(n[n.startIndex..<eq])
+        return settings.contains { $0.env == key }
+    }
     func isForced(_ s: Setting) -> Bool { guard let n = s.forced else { return false }; return holds(n) }
     func forcedBy(_ s: Setting) -> String? {   // the label of the setting that forces the row now, for its note
         guard isForced(s), let n = s.forced, let eq = n.firstIndex(of: "=") else { return nil }
@@ -92,7 +101,10 @@ final class LauncherModel: ObservableObject {
         return values[String(n[n.startIndex..<eq])] == String(n[n.index(after: eq)...])
     }
     private func enforce() {
-        for s in settings where isForced(s) && !fixed.contains(s.env) && values[s.env] != s.onValue { values[s.env] = s.onValue }
+        for s in settings where isManaged(s) {
+            let want = isForced(s) ? s.onValue : s.offValue
+            if values[s.env] != want { values[s.env] = want }
+        }
     }
     func rows(in section: String) -> [Setting] { settings.filter { $0.sectionTitle == section && visible($0) } }
 

@@ -165,9 +165,29 @@ class LauncherSettingsTests(unittest.TestCase):
                 profile = type('Profile', (), {'id': BOTW, 'get': lambda self, key, default='', bad=bad: bad})()
                 with self.assertRaises(SystemExit): settings.render_base(profile)
 
+    def test_a_choice_can_describe_each_value(self):
+        """the optional 10th column gives a choice a line per value (Pointer Mode: Trackpad and Touch each describe themselves); a literal \\n is a line break"""
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / 'settings.tsv').write_text('# header\nDM_C\tchoice\ta=A,b=B\ta\talways\tGame\tC\t\t\ta=First\\n• one|b=Second\n', encoding='utf-8')
+            with patch.object(settings, 'HERE', Path(tmp)), patch.object(settings.nacp, 'languages', return_value=['en-US']):
+                row = settings.build('0100E7A019246000', tmp, Path(tmp) / 'control.nacp')['settings'][0]
+        self.assertEqual(row['option_notes'], {'a': 'First\n• one', 'b': 'Second'})
+        self.assertEqual(row['note'], '')
+        tsv = (ROOT / 'dm/games/settings.tsv').read_text(encoding='utf-8')
+        pointer = next(l for l in tsv.splitlines() if l.startswith('DM_POINTER_MODE\t')).split('\t')
+        notes = dict(p.split('=', 1) for p in pointer[9].split('|'))
+        self.assertEqual(set(notes), {'trackpad', 'touch'})
+        self.assertTrue(all('Controls:' in v for v in notes.values()) and pointer[7] == '', 'each mode has its own description; the shared note is empty')
+        schema = json.loads((ROOT / 'docs/launcher.schema.json').read_text(encoding='utf-8'))
+        self.assertIn('option_notes', schema['$defs']['setting']['properties'])
+
     def test_table_format_is_strict(self):
         good = 'DM_X\ttoggle\t-\t0\talways\tGame\tX\n'
-        for bad, why in [('DM_X\ttoggle\t-\t0\talways\tGame\tX\t\tlevel=basic\textra\n', 'columns'),
+        for bad, why in [('DM_X\ttoggle\t-\t0\talways\tGame\tX\t\tlevel=basic\t\textra\n', 'columns'),
+                         ('DM_X\ttoggle\t-\t0\talways\tGame\tX\t\t\ton=a\n', 'belong to a choice'),
+                         ('DM_C\tchoice\ta=A,b=B\ta\talways\tGame\tC\t\t\tc=nope\n', 'never takes'),
+                         ('DM_C\tchoice\ta=A,b=B\ta\talways\tGame\tC\t\t\ta=one|a=two\n', 'twice'),
+                         ('DM_C\tchoice\ta=A,b=B\ta\talways\tGame\tC\t\t\ta\n', 'value=note'),
                          ('DM_X\ttoggle\t-\t0\talways\tGame\tX\t\tneeds=DM_NOPE=1\n', 'no row sets'),
                          ('DM_Y\ttoggle\t-\t0\talways\tGame\tY\t\tneeds=DM_X=on\n', 'never takes'),
                          ('DM_X\ttoggle\t-\t0\talways\tGame\tX\t\tunless=DM_NOPE=1\n', 'no row sets'),

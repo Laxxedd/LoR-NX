@@ -12,7 +12,8 @@ struct SettingRow: View {
 
     private var locked: Bool { m.fixed.contains(s.env) }
     private var note: String {
-        var parts = s.note.isEmpty ? [] : [s.note]
+        let text = s.noteText(m.values[s.env] ?? s.def)   // a choice can have a line for each value (Pointer Mode)
+        var parts = text.isEmpty ? [] : [text]
         if locked { parts.append(m.fromLaunch.contains(s.env) ? "Set at launch" : "Set by an env file") }
         if let by = m.forcedBy(s) { parts.append("On while \(by) is on") }
         return parts.joined(separator: " · ")

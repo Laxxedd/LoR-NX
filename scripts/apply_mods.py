@@ -129,7 +129,7 @@ def main():
         if category not in CATEGORIES: sys.exit(f'[RED] {mid}: launcher category {category!r} must be one of {", ".join(CATEGORIES)}')
         rows = [{'env': env, 'kind': 'toggle', 'section': 'Mods', 'category': category, 'label': lc.get('label', mod.get('title', mid)),
                  'note': lc.get('note', mod.get('description', '')), 'default': '0', 'on': '1', 'off': '0'}]
-        if lc.get('forced'):   # "<VAR>=<value>": the switch is turned on, and locked on, while that launcher setting has that value (touch-ui while Touchscreen Mode is on)
+        if lc.get('forced'):   # "<VAR>=<value>": the switch follows that launcher setting (on while it has that value, off otherwise) and is not offered on the mods page (touch-ui follows Touchscreen Mode)
             if not re.fullmatch(r'DM_[A-Z0-9_]+=[^;=]+', lc['forced']): sys.exit(f'[RED] {mid}: launcher forced {lc["forced"]!r} must be <DM_VAR>=<value>')
             rows[0]['forced'] = lc['forced']
         for st in mod.get('settings', []):

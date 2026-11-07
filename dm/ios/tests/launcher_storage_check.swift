@@ -55,25 +55,38 @@ import Foundation
         expect(!m.greyedOut(row("DM_TOUCH_HAPTICS")) && !m.greyedOut(row("DM_TOUCHSCREEN")), "Touch feedback and Touchscreen Mode stay enabled")
         expect(Array(m.rows(in: "Controls").map(\.env).prefix(2)) == ["DM_TOUCH_HAPTICS", "DM_TOUCHSCREEN"], "Touchscreen Mode comes right under Touch feedback")
         m.values["DM_TOUCHSCREEN"] = "0"
-        // "forced": a mod's switch (touch-ui) is turned on and locked while Touchscreen Mode is on, and free again, still on, once it is off
-        let forcedJSON = #"{"settings":[{"env":"DM_TOUCHSCREEN","kind":"toggle","section":"Controls","label":"Touchscreen Mode","note":"","default":"0","on":"1","off":"0"},{"env":"DM_MOD_TOUCHUI","kind":"toggle","section":"Mods","category":"Quality of Life","label":"Touch UI","note":"","default":"0","on":"1","off":"0","forced":"DM_TOUCHSCREEN=1"}]}"#
+        // "forced": a mod's switch (touch-ui) follows Touchscreen Mode: on while it is on, off as soon as it is off, and never offered on the mods page
+        let forcedJSON = #"{"settings":[{"env":"DM_TOUCHSCREEN","kind":"toggle","section":"Controls","label":"Touchscreen Mode","note":"","default":"0","on":"1","off":"0"},{"env":"DM_MOD_TOUCHUI","kind":"toggle","section":"Mods","category":"Quality of Life","label":"Touch UI","note":"","default":"0","on":"1","off":"0","forced":"DM_TOUCHSCREEN=1"},{"env":"DM_MOD_OTHER","kind":"toggle","section":"Mods","category":"Quality of Life","label":"Other","note":"","default":"0","on":"1","off":"0"}]}"#
         let forcedRows = try! JSONDecoder().decode(SettingsFile.self, from: Data(forcedJSON.utf8)).settings
         let fm = LauncherModel(forcedRows, defaults: d)
         let touchUI = forcedRows[1]
-        expect(fm.values["DM_MOD_TOUCHUI"] == "0" && !fm.greyedOut(touchUI) && fm.forcedBy(touchUI) == nil, "the forced switch is free and off while Touchscreen Mode is off")
+        expect(fm.values["DM_MOD_TOUCHUI"] == "0" && fm.isManaged(touchUI), "the touch-ui switch is off while Touchscreen Mode is off")
+        expect(!fm.mods(in: "Quality of Life").contains { $0.env == "DM_MOD_TOUCHUI" } && fm.mods(in: "Quality of Life").contains { $0.env == "DM_MOD_OTHER" }, "touch-ui is not on the mods page, an ordinary mod is")
         fm.values["DM_TOUCHSCREEN"] = "1"
-        expect(fm.values["DM_MOD_TOUCHUI"] == "1" && fm.greyedOut(touchUI) && fm.forcedBy(touchUI) == "Touchscreen Mode", "Touchscreen Mode turns the forced switch on and locks it")
+        expect(fm.values["DM_MOD_TOUCHUI"] == "1" && fm.modsOn == 0, "Touchscreen Mode turns the touch-ui switch on; it is not counted among the mods the player turned on")
         fm.values["DM_MOD_TOUCHUI"] = "0"
-        expect(fm.values["DM_MOD_TOUCHUI"] == "1", "the forced switch cannot be turned off while Touchscreen Mode is on")
+        expect(fm.values["DM_MOD_TOUCHUI"] == "1", "the switch cannot be turned off while Touchscreen Mode is on")
         fm.values["DM_TOUCHSCREEN"] = "0"
-        expect(fm.values["DM_MOD_TOUCHUI"] == "1" && !fm.greyedOut(touchUI), "with Touchscreen Mode off the switch is free and stays on")
-        fm.values["DM_MOD_TOUCHUI"] = "0"
-        expect(fm.values["DM_MOD_TOUCHUI"] == "0", "..and can be turned off")
+        expect(fm.values["DM_MOD_TOUCHUI"] == "0", "turning Touchscreen Mode off turns the touch-ui switch off")
+        fm.values["DM_TOUCHSCREEN"] = "1"; fm.apply()
+        expect(String(cString: getenv("DM_MOD_TOUCHUI")) == "1", "Play with Touchscreen Mode on starts the game with the mod on")
+        fm.values["DM_TOUCHSCREEN"] = "0"; fm.apply()
+        expect(String(cString: getenv("DM_MOD_TOUCHUI")) == "0", "Play with Touchscreen Mode off starts the game with the mod off")
+        d.set("1", forKey: "launcher.DM_MOD_TOUCHUI")
+        expect(LauncherModel(forcedRows, defaults: d).values["DM_MOD_TOUCHUI"] == "0", "a touch-ui choice saved by an older build does not keep the mod on with Touchscreen Mode off")
+        d.removeObject(forKey: "launcher.DM_MOD_TOUCHUI")
         d.set("1", forKey: "launcher.DM_TOUCHSCREEN")
         expect(LauncherModel(forcedRows, defaults: d).values["DM_MOD_TOUCHUI"] == "1", "a saved Touchscreen Mode turns the switch on at start")
         d.removeObject(forKey: "launcher.DM_TOUCHSCREEN")
         fm.values["DM_TOUCHSCREEN"] = "1"; fm.reset()
         expect(fm.values["DM_TOUCHSCREEN"] == "0" && fm.values["DM_MOD_TOUCHUI"] == "0", "Reset shows both at their defaults")
+        let noController = Array(forcedRows.dropFirst())
+        let nm = LauncherModel(noController, defaults: d)
+        expect(!nm.isManaged(noController[0]) && nm.mods(in: "Quality of Life").contains { $0.env == "DM_MOD_TOUCHUI" }, "a game without Touchscreen Mode keeps touch-ui as an ordinary switch on the mods page")
+        // option notes: a choice's line under the label follows the chosen value (Pointer Mode)
+        let pointer = row("DM_POINTER_MODE")
+        expect(pointer.noteText("trackpad") != pointer.noteText("touch") && pointer.noteText("trackpad").contains("trackpad") && pointer.noteText("touch").contains("Pinch"), "Pointer Mode describes the chosen mode, not both")
+        expect(row("DM_TOUCHSCREEN").noteText("1") == row("DM_TOUCHSCREEN").note, "a row without option notes shows its note")
         // DM_LAUNCHER=0 skips the screen, not the saved choices; DM_SAVED_CHOICES=0 ignores them and leaves them stored
         let fps = file.settings.first { $0.env == "DM_FPS_TARGET" }!
         d.set("30", forKey: "launcher.DM_FPS_TARGET"); unsetenv("DM_FPS_TARGET")

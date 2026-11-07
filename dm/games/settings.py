@@ -36,6 +36,18 @@ def meta(text, n):
     return out
 
 
+def option_notes(text, values, n):
+    """The optional 10th column as {value: note}: value=note pairs separated by |, a literal \\n in a note is a line break; each value must be one the choice offers"""
+    out = {}
+    for pair in filter(None, (p.strip() for p in text.split('|'))):
+        value, eq, note = pair.partition('=')
+        if not eq or not note: sys.exit(f'settings.tsv:{n}: option notes are value=note|value=note: {pair!r}')
+        if value in out: sys.exit(f'settings.tsv:{n}: option note for {value} given twice')
+        if value not in values: sys.exit(f'settings.tsv:{n}: option note for a value the choice never takes: {value} (it takes {", ".join(values)})')
+        out[value] = note.replace('\\n', '\n')
+    return out
+
+
 def render_base(g):
     """The profile's render_base ("<w>x<h> <w>x<h>": the 3D views' base size docked, then handheld, which DM_RENDER_SCALE scales) as
     {"docked": [w, h], "handheld": [w, h]}, for a front end to show the render scale in pixels; None when the profile has none"""
@@ -50,9 +62,9 @@ def rows():
     for n, line in enumerate((HERE / 'settings.tsv').read_text(encoding='utf-8').splitlines(), 1):
         if not line.strip() or line.startswith('#'): continue
         c = line.split('\t')
-        if len(c) not in (7, 8, 9): sys.exit(f'settings.tsv:{n}: 7 to 9 columns expected, {len(c)} found')
+        if len(c) not in (7, 8, 9, 10): sys.exit(f'settings.tsv:{n}: 7 to 10 columns expected, {len(c)} found')
         if c[5] not in SECTIONS: sys.exit(f'settings.tsv:{n}: unknown section: {c[5]}')
-        yield n, c + [''] * (9 - len(c))
+        yield n, c + [''] * (10 - len(c))
 
 
 def mod_rows(path, taken):
@@ -73,7 +85,7 @@ def mod_rows(path, taken):
             row.update({'default': r['default'] if r.get('default') in (on, off) else off, 'on': on, 'off': off})
         else: row.update({k: r[k] for k in ('default', 'min', 'max', 'step', 'options', 'format') if k in r})
         if r.get('needs'): row['needs'] = r['needs']
-        if r.get('forced'):   # <VAR>=<value>: a mod's switch turned on and greyed out while the row that sets <VAR> has that value (touch-ui while Touchscreen Mode is on)
+        if r.get('forced'):   # <VAR>=<value>: a mod's switch that follows the row that sets <VAR> (on while it has that value, off otherwise; not offered on the mods page): touch-ui follows Touchscreen Mode
             if not re.fullmatch(r'DM_[A-Z0-9_]+=[^;=]+', r['forced']): sys.exit(f'DM_MODS_SETTINGS: {env} forced {r["forced"]!r} must be <DM_VAR>=<value>')
             row['forced'] = r['forced']
         out.append(row)
@@ -124,8 +136,9 @@ def build(gid, patched, control):
         return None
 
     out, table, base = [], {r[1][0]: takes(r[1][1], r[1][2]) for r in rows()}, render_base(g)
-    for n, (var, kind, values, default, cond, section, label, note, extra) in rows():
+    for n, (var, kind, values, default, cond, section, label, note, extra, notes) in rows():
         m = meta(extra, n)
+        if notes and kind != 'choice': sys.exit(f'settings.tsv:{n}: option notes belong to a choice row, not a {kind}')
         if 'needs' in m:
             need, want = m['needs'].split('=', 1)
             if need not in table: sys.exit(f'settings.tsv:{n}: needs names a variable no row sets: {m["needs"]}')
@@ -144,6 +157,7 @@ def build(gid, patched, control):
             if any(len(o) != 2 for o in opts): sys.exit(f'settings.tsv:{n}: choice values are value=label,...')
             if s['default'] not in [o[0] for o in opts]: s['default'] = opts[0][0]   # a default the game does not offer (a language it lacks): its first
             s['options'] = opts
+            if notes: s['option_notes'] = option_notes(notes, [o[0] for o in opts], n)   # the line under the label for each value (Pointer Mode)
         elif kind == 'range':
             lo, hi, st = (float(x) for x in values.split(':'))
             s.update(min=lo, max=hi, step=st)
