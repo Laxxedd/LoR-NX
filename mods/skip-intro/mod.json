@@ -1,18 +1,32 @@
 {
   "id": "skip-intro",
   "title": "Skip Intro (Library of Ruina)",
-  "description": "The Skip Intro exefs patch of Library-of-Ruina-NX-Mods (the author's personal patch), for Library of Ruina 1.0.3.",
+  "description": "The Skip Intro exefs patch of Library-of-Ruina-NX-Mods (the author's personal patch), for Library of Ruina 1.0.3, and a host callback that lets a tap or key press of Touchscreen Mode end the auto-save notice before the AMV, which only the A button ends in the game.",
   "launcher": {
     "env": "DM_MOD_SKIPINTRO",
     "category": "Quality of Life",
     "label": "Skip Intro",
-    "note": "Automatically skips the AMV on startup. Original mod by trilliance"
+    "note": "Automatically skips the AMV on startup. In Touchscreen Mode, tapping the screen skips the auto-save notice before it. Original mod by trilliance"
   },
   "game": "Library of Ruina 1.0.3",
+  "gates": [
+    "splash_pre"
+  ],
+  "host": "host.c",
   "exefs": "exefs",
   "expect": {
     "aeea627ddbd1214764dfef5f965e94a2": {
       "0x16f3d24": "f9401260"
     }
+  },
+  "obs": {
+    "aeea627ddbd1214764dfef5f965e94a2": [
+      {
+        "gate": "splash_pre",
+        "offset": "0x353d290",
+        "word": "39416668",
+        "reason": "AutoSavingUI.Update, the join point before the _isPlayingNotification check (ldrb w8,[x19,#0x59]): x19 = the AutoSavingUI; in Touchscreen Mode a tap or key press ends the auto-save notice"
+      }
+    ]
   }
 }
