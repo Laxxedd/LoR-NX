@@ -6,6 +6,8 @@
 # Usage: dm/ios/tools/build_ipa.sh [output.ipa | --prepare-xcode]; --prepare-xcode generates the project without building, signing or packing.
 #   Environment: GAME=game profile (dm/games/<base game title ID>, or one in DM_GAMES_DIR; required), W=the game's work folder (required: <NSP folder>/<title ID>-work, never the home folder), PATCHED / ROMFS / MSL_IOS can each be overridden
 #   DM_COPY_ROMFS=NO leaves the game files (RomFS) out of the IPA, as it does for the Xcode build phase: the package then stays small (a large game's full package can exceed what iOS extracts), and the app takes the files from Documents/romfs.img (scripts/push_romfs.sh); default: they are packed
+#   DM_COPY_SHADERS=NO leaves the shader libraries (msl/<b-chain | vk | gl>, the largest part of what is left of a DM_COPY_ROMFS=NO package) out of the IPA too: the app then takes them from Documents/msl, which
+#   scripts/push_shaders.sh copies there once per build (a Files-app copy of <O>/shaders/msl works as well); this script stages that folder at $O/shaders/msl (hard links, dm/tools/msl_id.py) and the IPA carries msl.id, the identity main.m checks
 #   DM_ENTITLEMENTS=<plist> is the unsigned IPA's entitlements, signed ad-hoc into the executable (default: Increased Memory Limit; an empty string = none)
 #   AOC=add-on content directory (default $W/data/aoc; when it exists it goes to DmIOS.app/aoc/<index>/; an empty string = none), GFXAPI=nvn / vulkan (default: by the shader libraries in MSL_IOS)
 #   The app name is the game name in the base NSP's control data ($W/data/v0/control.nacp, else the one next to the RomFS), the app version is the display version in the packed game's control data (the one next to the RomFS:
@@ -141,6 +143,7 @@ if [ "$PREPARE_XCODE" = YES ] && [ -n "${DM_ENTITLEMENTS-default}" ]; then
 fi
 # DM_COPY_ROMFS=NO also for the prepared project: its Copy game resources phase (stage_resources.sh) then leaves the game files out and writes the image's identity; Gen/dm.xcconfig is made again by every run
 [ "${DM_COPY_ROMFS:-YES}" != NO ] || [ "$PREPARE_XCODE" != YES ] || echo "DM_COPY_ROMFS = NO" >> Gen/dm.xcconfig
+[ "${DM_COPY_SHADERS:-YES}" != NO ] || [ "$PREPARE_XCODE" != YES ] || echo "DM_COPY_SHADERS = NO" >> Gen/dm.xcconfig   # likewise: stage_resources.sh leaves the shaders out and writes msl.id
 xcodegen generate -q > /dev/null || die "xcodegen"
 # DMCommit / DMChain: the checkout that built the app (+dirty with uncommitted changes to tracked files) and the shader chain it carries, which the host logs at start (main.c)
 COMMIT=$(git -C "$DM" rev-parse --short=12 HEAD 2> /dev/null) && { [ -z "$(git -C "$DM" status --porcelain --untracked-files=no 2> /dev/null)" ] || COMMIT=$COMMIT+dirty
@@ -199,13 +202,21 @@ if [ "${DM_COPY_ROMFS:-YES}" = NO ]; then
 elif [ -f "$ROMFS" ]; then MAPS=("$P/romfs.img=$ROMFS"); else MAPS=("$P/romfs=$ROMFS"); fi
 if [ -n "$AOC" ] && [ -d "$AOC" ]; then MAPS+=("$P/aoc=$AOC"); t "add-on content: $(ls "$AOC" | tr '\n' ' ')"; fi
 if [ -n "${PSO:-}" ]; then MAPS+=("$P/pso=$PSO"); fi
-MAPS+=("$P/msl/$MSLDIR=$MSL_IOS/$MSLDIR" "$P=$APP")
+MAPS+=("$P=$APP")
 t "pack IPA (already-compressed game files stored, everything else deflated)"
 # The pulling vertex libraries (<key>_bp, dm/gfx/tools/dmsh_pull.py) serve the hybrid pipelines. Default to the same pso_mtl4 setting compiled by gen_build.py; IOS_PULL=0 / 1 overrides it.
 # The pipeline archive's bases are made of them, so an IPA with an archive (pso/) always carries them, whatever IOS_PULL says (an Xcode build copies them always).
 PULL=$(sed -n 's/^#define DM_GAME_PSO_MTL4 //p' "$DM/host/gen/$GAME/game_profile.h") || die "read game profile header"
 case "$PULL" in 0|1) ;; *) die "no DM_GAME_PSO_MTL4 in generated game profile";; esac
 # Keep this array nonempty: macOS Bash 3.2 treats an empty array as unset under set -u.
-PACK_OPTS=(--store "$(gp zip_store)"); [ -n "${PSO:-}" ] || [ "${IOS_PULL:-$PULL}" = 1 ] || PACK_OPTS+=(--skip-suffix _bp.metallib)
-python3 tools/pack_ipa.py "$OUT_IPA" "${PACK_OPTS[@]}" --skip $P/_CodeSignature --skip $P/embedded.mobileprovision --skip $P/msl --skip $P/aoc --skip $P/romfs --skip $P/romfs.img --skip $P/romfs.id "${MAPS[@]}" || die "pack_ipa"
+PACK_OPTS=(--store "$(gp zip_store)"); MSL_FILTER=(); [ -n "${PSO:-}" ] || [ "${IOS_PULL:-$PULL}" = 1 ] || { PACK_OPTS+=(--skip-suffix _bp.metallib); MSL_FILTER=(--skip-suffix _bp.metallib); }
+# The shader libraries: into the IPA as msl/<folder>, or with DM_COPY_SHADERS=NO staged at $O/shaders/msl for scripts/push_shaders.sh (the same files, the _bp filter above included) with their identity in the IPA as msl.id
+if [ "${DM_COPY_SHADERS:-YES}" = NO ]; then
+  rm -rf "$O/shaders"
+  MSLID=$(python3 -I "$DM/tools/msl_id.py" --stage "$MSL_IOS" "$MSLDIR" "$O/shaders" ${MSL_FILTER[@]+"${MSL_FILTER[@]}"}) || die "stage the shader libraries (dm/tools/msl_id.py)"
+  printf '%s\n' "$MSLID" > "$O/msl.id" || die "write msl.id"
+  MAPS+=("$P/msl.id=$O/msl.id")
+  t "no shader libraries in the IPA (DM_COPY_SHADERS=NO): the app takes Documents/msl, staged at $O/shaders/msl ($MSLID); scripts/push_shaders.sh <device UDID> ${DM_BUNDLE_ID} \"$O/shaders/msl\""
+else MAPS+=("$P/msl/$MSLDIR=$MSL_IOS/$MSLDIR"); fi
+python3 tools/pack_ipa.py "$OUT_IPA" "${PACK_OPTS[@]}" --skip $P/_CodeSignature --skip $P/embedded.mobileprovision --skip $P/msl --skip $P/msl.id --skip $P/aoc --skip $P/romfs --skip $P/romfs.img --skip $P/romfs.id "${MAPS[@]}" || die "pack_ipa"
 t "done: $OUT_IPA ($(du -h "$OUT_IPA" | cut -f1))"

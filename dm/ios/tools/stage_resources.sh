@@ -23,7 +23,7 @@ case "$DM_RESOURCE_MSLDIR" in b-*)
     [ "$DM_RESOURCE_MSLDIR" = "b-$V" ] || die "The prepared shaders are chain $DM_RESOURCE_MSLDIR, the sources are now at b-$V: prepare the game again (build_ipa_from_nsp.py --prepare-xcode)";;
 esac
 echo 'Copy game resources (the first build copies the complete game; later builds sync changes)'
-mkdir -p "$APP/msl/$DM_RESOURCE_MSLDIR"
+[ "${DM_COPY_SHADERS:-YES}" = NO ] || mkdir -p "$APP/msl/$DM_RESOURCE_MSLDIR"
 # DM_COPY_ROMFS=NO: the game files stay out of the app (main.m takes Documents/romfs first, copied there once): a reinstall then sends the code and shaders, not the whole game
 if [ "${DM_COPY_ROMFS:-YES}" = NO ]; then
     rm -rf "$APP/romfs" "$APP/romfs.img" "$APP/romfs.id"
@@ -38,10 +38,21 @@ else
     mkdir -p "$APP/romfs"; /usr/bin/rsync -a --delete -- "$DM_RESOURCE_ROMFS/" "$APP/romfs/"
     rm -f "$APP/romfs.img" "$APP/romfs.id"
 fi
-/usr/bin/rsync -a --delete -- "$DM_RESOURCE_SHADERS/" "$APP/msl/$DM_RESOURCE_MSLDIR/"
-for old in "$APP/msl/"*; do
-    [ "$old" = "$APP/msl/$DM_RESOURCE_MSLDIR" ] || rm -rf "$old"
-done
+# DM_COPY_SHADERS=NO: the shader libraries stay out of the app as well (main.m takes Documents/msl, copied there once by scripts/push_shaders.sh from <project>/Gen/shaders/msl, staged here).
+# <App>/msl.id is the identity of that set (dm/tools/msl_id.py); the app uses only a Documents/msl with the same one
+if [ "${DM_COPY_SHADERS:-YES}" = NO ]; then
+    rm -rf "$APP/msl" "$APP/msl.id"
+    msl_root=$(dirname "$DM_RESOURCE_SHADERS")
+    [ "$(basename "$DM_RESOURCE_SHADERS")" = "$DM_RESOURCE_MSLDIR" ] || die "The shader folder $DM_RESOURCE_SHADERS is not named $DM_RESOURCE_MSLDIR"
+    python3 -I "$resource_dm/tools/msl_id.py" --stage "$msl_root" "$DM_RESOURCE_MSLDIR" "$SRCROOT/Gen/shaders" > "$APP/msl.id" || die "stage the shader libraries (dm/tools/msl_id.py)"
+    echo "Shader libraries left out of the app (DM_COPY_SHADERS=NO): $(cat "$APP/msl.id"); push $SRCROOT/Gen/shaders/msl with scripts/push_shaders.sh"
+else
+    rm -f "$APP/msl.id"
+    /usr/bin/rsync -a --delete -- "$DM_RESOURCE_SHADERS/" "$APP/msl/$DM_RESOURCE_MSLDIR/"
+    for old in "$APP/msl/"*; do
+        [ "$old" = "$APP/msl/$DM_RESOURCE_MSLDIR" ] || rm -rf "$old"
+    done
+fi
 if [ -n "$DM_RESOURCE_AOC" ]; then
     mkdir -p "$APP/aoc"
     /usr/bin/rsync -a --delete -- "$DM_RESOURCE_AOC/" "$APP/aoc/"

@@ -45,6 +45,9 @@ APP_NAME = ''                           # app name on the home screen (empty = t
 BUNDLE_ID = ''                          # the app's bundle ID (empty = saved per-game Xcode ID, else org.nxnative.<base game title ID in lowercase>)
 ROMFS = 'bundle'                        # 'bundle' = the game files go into the IPA (or the Xcode app), as always; 'separate' = they stay out (DM_COPY_ROMFS=NO): the IPA is small, and its rebuilds do not pack or send the RomFS again.
                                         #   Copy it to the phone once per game version with the scripts/push_romfs.sh command printed at the end (the app checks that the image is the one it was built for)
+SHADERS = 'bundle'                      # 'bundle' = the iPhone shader libraries go into the IPA (or the Xcode app), as always; 'separate' = they stay out too (DM_COPY_SHADERS=NO): with --romfs separate the IPA is then
+                                        #   the code only (Library of Ruina: 630 MB -> about 125 MB). Copy them to the phone's Documents/msl once per build with the scripts/push_shaders.sh command printed at the end
+                                        #   (or copy the folder it names with the Files app); the app refuses a set that is not the one it was built for, or one cut off partway. Only for an iOS IPA or Xcode project
 PREPARE_XCODE = False                   # prepare a per-game Xcode project and add it to the workspace instead of packing an IPA; requires KEEP_EXTRACTED
 PLATFORM = 'ios'                        # 'ios' = the IPA (or the Xcode project); 'mac-app' = a double-clickable Mac app of the game; 'mac' = development: build only what running the game on this Mac needs (Mac shaders, the Mac host), no iOS shaders,
                                         #   Xcode project or IPA; keeps the extracted files and prints the command that runs the game (needs Apple silicon)
@@ -2192,6 +2195,8 @@ def parse_args(argv):
     ap.add_argument('--bundle-id', help='the app\'s bundle ID (default: saved Xcode ID when preparing again, else org.nxnative.<base game title ID in lowercase>)')
     ap.add_argument('--romfs', choices=('bundle', 'separate'), help='bundle = the game files go into the IPA (default: the ROMFS setting, bundle); separate = they stay out of the IPA and the Xcode app: the build is small and fast, and the RomFS image '
                     'is copied to the phone once per game version with the scripts/push_romfs.sh command printed at the end (the app refuses an image of another version)')
+    ap.add_argument('--shaders', choices=('bundle', 'separate'), help='bundle = the shader libraries go into the IPA (default: the SHADERS setting, bundle); separate = they stay out of the IPA and the Xcode app too: with --romfs separate the IPA is only the code, '
+                    'and the libraries are copied to the phone\'s Documents/msl once per build with the scripts/push_shaders.sh command printed at the end (the app refuses a set of another build or one cut off partway)')
     ap.add_argument('--prepare-xcode', action='store_true', help='prepare a per-game Xcode project and add it to the shared workspace instead of packing an IPA (requires keeping extracted files)')
     ap.add_argument('--platform', choices=('ios', 'mac', 'mac-app'), help='ios = the IPA (or the Xcode project); mac = for development: build only what running the game on this Mac needs (the Mac shaders and the Mac host, '
                     'no iOS shaders, Xcode project or IPA), keep the extracted files and print the command that runs the game; mac-app = what mac builds, then a self-contained, double-clickable '
@@ -2230,6 +2235,14 @@ def say_push_romfs(image, bundle_id):
     PROG.say(f'  scripts/push_romfs.sh <device UDID> {bundle_id} "{image}"')
     # the file on disk, as build_ipa.sh's [ -f "$ROMFS" ] decides whether romfs.id is written: rfs.source() is a romfs.Path, whose is_dir() is True for an image's root (GitHub issue #530)
     if not os.path.isfile(image): say('[RED] the extraction holds a RomFS folder, not an image: this build carries no identity for it, and push_romfs.sh packs the folder first (delete extract/ and build again for an image)')
+
+
+def say_push_shaders(folder, bundle_id, note=''):
+    """The command that puts a --shaders separate build's shader libraries on the phone. The folder is staged by every build (hard links to the libraries, plus msl.id, dm/tools/msl_id.py), and the app uses
+    Documents/msl only when its msl.id is the one it was built with and its files add up to the count and size in it, so the command is needed again after each build that changed the shaders"""
+    say('the shader libraries are not in this build. Copy them to the phone with the app installed, again whenever they changed (a new translation chain, game version or table), or copy that folder with the Files app to the app\'s Documents as "msl"'
+        + (f' ({note})' if note else '') + ':')
+    PROG.say(f'  scripts/push_shaders.sh <device UDID> {bundle_id} "{folder}"')
 
 
 def report_fix_coverage(patched, mods, reg):
@@ -2301,6 +2314,9 @@ def main(args=None):
     if args.xcode_workspace and not prepare_xcode: raise BuildError('--xcode-workspace requires --prepare-xcode')
     romfs_mode = args.romfs or ROMFS
     if romfs_mode not in ('bundle', 'separate'): raise BuildError(f'ROMFS / --romfs must be bundle or separate: {romfs_mode}')
+    shaders_mode = args.shaders or SHADERS
+    if shaders_mode not in ('bundle', 'separate'): raise BuildError(f'SHADERS / --shaders must be bundle or separate: {shaders_mode}')
+    if shaders_mode == 'separate' and mac: raise BuildError(f'--shaders separate keeps the shader libraries off the iPhone app: it cannot be combined with --platform {platform}, which runs from the Mac libraries')
     if romfs_mode == 'separate' and mac: raise BuildError(f'--romfs separate keeps the game files off the iPhone app: it cannot be combined with --platform {platform}, which runs from the extracted files')
     if romfs_mode == 'separate' and not keep: raise BuildError('--romfs separate requires --keep-extracted: the image must remain available for the one-time transfer to the phone')
     nsp_dir = Path(os.path.expanduser(args.nsp_dir or NSP_DIR or ask('NSP folder: ', 'the NSP folder'))).resolve()
@@ -2521,6 +2537,9 @@ def main(args=None):
     if prepare_xcode: ipa_env['DM_XCODE_PROJECT_DIR'] = str(project.parent)
     separate = romfs_mode == 'separate'
     if separate: ipa_env['DM_COPY_ROMFS'] = 'NO'; say('game files: separate (DM_COPY_ROMFS=NO), left out of the app; the image stays at ' + str(rfs.source(game)))
+    separate_shaders = shaders_mode == 'separate'
+    shader_stage = work / 'ipa/build/ios/pkg/shaders/msl' if not prepare_xcode else project.parent / 'Gen/shaders/msl'   # where build_ipa.sh / the Xcode copy phase stage them (dm/tools/msl_id.py)
+    if separate_shaders: ipa_env['DM_COPY_SHADERS'] = 'NO'; say('shader libraries: separate (DM_COPY_SHADERS=NO), left out of the app; staged at ' + str(shader_stage))
     if app_version: ipa_env['DM_APP_VERSION'] = app_version
     if icon: ipa_env['DM_ICON'] = str(icon); say(f'app icon: {icon}')   # app icon (found above)
     else: say('[RED] no game icon in the extraction (an older extraction did not save it: delete extract/ and run again); the home-screen icon will be blank')
@@ -2544,6 +2563,7 @@ def main(args=None):
         say(f'game project: {project}')
         say(f'Xcode derived data: {work / "xcode-derived-data"}')
         if separate: say_push_romfs(rfs.source(game), bundle_id)
+        if separate_shaders: say_push_shaders(shader_stage, bundle_id, 'the first Run (Release) stages them')
         say('choose the game scheme in Xcode, select your Team and iPhone or iPad, then Run (Release)')
         report_profile_status(g, reg, pkg_ver, derived, provisional, 'Xcode project', patched)
         return
@@ -2557,6 +2577,7 @@ def main(args=None):
         say(f'deleting the extracted game files: {ex}'); rmtree(ex)
     say(f'done: {out_ipa} ({out_ipa.stat().st_size / 2**30:.1f} GB)')
     if separate: say_push_romfs(rfs.source(game), bundle_id)
+    if separate_shaders: say_push_shaders(shader_stage, bundle_id)
     report_profile_status(g, reg, pkg_ver, derived, provisional, patched=patched)
 
 

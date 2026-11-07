@@ -98,6 +98,38 @@ static void aoc_locate(void) {
 // Why a slim build found no usable game files: the verdict on Documents/romfs.img (the first of romfs_document_images), in the log and for the screen (front_ios_boot_message). NULL when the build has no romfs.id
 static char g_boot_message[640];
 const char *front_ios_boot_message(void) { return g_boot_message[0] ? g_boot_message : NULL; }
+
+// Shader libraries: <App>/msl/<b-chain | vk | gl>, or, in a build made with DM_COPY_SHADERS=NO (scripts/push_shaders.sh), Documents/msl. Such a build carries <App>/msl.id, one line
+// (DMMSLID1 files=<count> bytes=<size> tree=<hash>, dm/tools/msl_id.py), and no msl/: only a Documents/msl with the same msl.id whose files add up to that count and size is used, so a
+// copy cut off partway or the shaders of another build are refused, as for romfs.img. A build with msl/ in the app (no msl.id) always uses it. Returns the folder, or nil with the reason in g_boot_message
+static NSString *msl_id_line(NSString *path) {
+    NSString *t = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
+    return [t stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+}
+static int msl_tree_matches(NSString *root, NSString *line) {   // the files under root (not msl.id, not hidden ones) add up to the line's files= and bytes=
+    unsigned long long want_files = 0, want_bytes = 0;
+    if (sscanf(line.UTF8String, "DMMSLID1 files=%llu bytes=%llu", &want_files, &want_bytes) != 2) return 0;
+    unsigned long long files = 0, bytes = 0;
+    NSDirectoryEnumerator *en = [NSFileManager.defaultManager enumeratorAtURL:[NSURL fileURLWithPath:root] includingPropertiesForKeys:@[NSURLIsRegularFileKey, NSURLFileSizeKey]
+                                                                      options:NSDirectoryEnumerationSkipsHiddenFiles errorHandler:nil];
+    for (NSURL *u in en) {
+        NSNumber *reg = nil, *size = nil;
+        [u getResourceValue:&reg forKey:NSURLIsRegularFileKey error:nil]; [u getResourceValue:&size forKey:NSURLFileSizeKey error:nil];
+        if (!reg.boolValue || (en.level == 1 && [u.lastPathComponent isEqualToString:@"msl.id"])) continue;
+        files++; bytes += size.unsignedLongLongValue;
+    }
+    return files == want_files && bytes == want_bytes;
+}
+static NSString *msl_locate(NSString *doc, NSString *res) {
+    NSString *bundled = [res stringByAppendingPathComponent:@"msl"], *want = msl_id_line([res stringByAppendingPathComponent:@"msl.id"]);
+    if (!want.length) return bundled;
+    NSString *dir = [doc stringByAppendingPathComponent:@"msl"], *got = msl_id_line([dir stringByAppendingPathComponent:@"msl.id"]);
+    const char *why = !got.length ? "has no msl.id (not copied, or cut off before the end)" : ![got isEqualToString:want] ? "is the shader set of another build" : !msl_tree_matches(dir, want) ? "is incomplete (a copy that stopped partway)" : NULL;
+    if (!why) return dir;
+    snprintf(g_boot_message, sizeof g_boot_message, "Shader libraries: Documents/msl %s. This build keeps its shaders out of the app: copy the msl folder of the same build to the app's Documents (scripts/push_shaders.sh, or the Files app), then restart.", why);
+    fprintf(stderr, "[RED] boot: %s (wanted: %s)\n", g_boot_message, want.UTF8String);
+    return nil;
+}
 static void romfs_identity_report(NSString *doc) {
     romfs_id want, got;
     int rc = romfs_id_check([NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"romfs.id"].fileSystemRepresentation,
@@ -113,7 +145,7 @@ static int boot_env(void) {
     NSString *res = NSBundle.mainBundle.resourcePath;
     for (NSString *d in @[@"save", @"temp"]) [fm createDirectoryAtPath:[doc stringByAppendingPathComponent:d] withIntermediateDirectories:YES attributes:nil error:nil];
     // Keep game files and scratch data out of device backups (Documents is backed up by default; a RomFS placed there is many GB). Saves, logs and the pipeline list stay in the backup
-    for (NSString *d in [@[@"romfs", @"temp", @"temp_astc"] arrayByAddingObjectsFromArray:[romfs_document_images(doc) valueForKey:@"lastPathComponent"]]) {
+    for (NSString *d in [@[@"romfs", @"msl", @"temp", @"temp_astc"] arrayByAddingObjectsFromArray:[romfs_document_images(doc) valueForKey:@"lastPathComponent"]]) {
         NSURL *u = [NSURL fileURLWithPath:[doc stringByAppendingPathComponent:d]]; NSError *e = nil;
         if ([fm fileExistsAtPath:u.path] && ![u setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:&e]) fprintf(stderr, "boot: %s could not be excluded from backup: %s\n", d.UTF8String, e.localizedDescription.UTF8String);
     }
@@ -167,7 +199,10 @@ static int boot_env(void) {
     setenv("DM_TEMP", [doc stringByAppendingPathComponent:@"temp"].fileSystemRepresentation, 0);
     NSString *dm = [res stringByAppendingPathComponent:@"dm"];
     setenv("DM_NVN_SHMAP", [dm stringByAppendingPathComponent:@"shader_map.tsv"].fileSystemRepresentation, 0);
-    setenv("DM_MSL_DIR", [res stringByAppendingPathComponent:@"msl"].fileSystemRepresentation, 0);
+    NSString *msl = getenv("DM_MSL_DIR") ? @(getenv("DM_MSL_DIR")) : msl_locate(doc, res);   // a DM_MSL_DIR set at launch or by an env file wins
+    if (!msl) return 0;   // a build without its shaders in the app and no matching Documents/msl: the screen says so (front_ios_boot_message)
+    fprintf(stderr, "boot: shader libraries %s\n", msl.fileSystemRepresentation);
+    setenv("DM_MSL_DIR", msl.fileSystemRepresentation, 0);
     setenv("DM_FONT_DIR", [dm stringByAppendingPathComponent:@"font"].fileSystemRepresentation, 0);   // Shared-font stand-ins (standard.ttf / nintendo_ext.ttf): iOS lacks the macOS font path
     aoc_locate();   // add-on content: Documents/aoc, else <App>/aoc; an empty Documents/aoc explicitly selects no DLC
     NSString *pso = [res stringByAppendingPathComponent:@"pso"];   // the pipeline archive made offline (build_ipa.sh, dm/gfx/tools/pso_offline.py): the shader pairs' bases, which the device then does not build

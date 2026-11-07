@@ -20,6 +20,14 @@ on:
         options:
           - headless
           - bundle
+      shader_mode:
+        description: "shader libraries"
+        required: true
+        default: headless
+        type: choice
+        options:
+          - headless
+          - bundle
       refresh_cache:
         description: "Ignore cache downloads"
         required: true
@@ -275,6 +283,7 @@ jobs:
           APP_NAME: ${{ inputs.app_name }}
           EXTRA_ARGS: ${{ inputs.extra_args }}
           ROMFS_MODE: ${{ inputs.romfs_mode }}
+          SHADER_MODE: ${{ inputs.shader_mode }}
         run: |
           set -eo pipefail
           GAME_DIR="$HOME/game"
@@ -283,6 +292,7 @@ jobs:
           if [ "$ROMFS_MODE" = headless ]; then ROMFS_MODE=separate; fi
           args=("$GAME_DIR" -k "$RUNNER_TEMP/prod.keys" -o "$GAME_DIR/nxnative.ipa" --work-dir "$WORK_DIR" --keep-extracted --romfs "$ROMFS_MODE" --progress lines)
           if [ -n "$APP_NAME" ]; then args+=(--app-name "$APP_NAME"); fi
+          if [ "$SHADER_MODE" = headless ]; then args+=(--shaders separate); fi
           # shellcheck disable=SC2086
           python3 scripts/build_ipa_from_nsp.py "${args[@]}" $EXTRA_ARGS
           ls -lh "$GAME_DIR/nxnative.ipa"
@@ -313,9 +323,21 @@ jobs:
         env:
           ENCRYPT: ${{ inputs.encrypt }}
           PASS: ${{ secrets.IPA_PASSPHRASE }}
+          SHADER_MODE: ${{ inputs.shader_mode }}
         run: |
           set -eo pipefail
           mkdir -p "$HOME/out"
+          # the shader libraries a headless build leaves out of the IPA are game-derived too: encrypted with the IPA when that is on
+          if [ "$SHADER_MODE" = headless ]; then
+            SHADERS="$HOME/work/ipa/build/ios/pkg/shaders/msl"
+            test -f "$SHADERS/msl.id"
+            if [ "$ENCRYPT" = "true" ] && [ -n "$PASS" ]; then
+              7zz a -mx=0 -mhe=on "-p$PASS" "$HOME/out/nxnative-shaders.7z" "$SHADERS"
+              echo "SHADER_OUT=$HOME/out/nxnative-shaders.7z" >> "$GITHUB_ENV"
+            else
+              echo "SHADER_OUT=$SHADERS" >> "$GITHUB_ENV"
+            fi
+          fi
           if [ "$ENCRYPT" = "true" ]; then
             if [ -z "$PASS" ]; then
               echo "::error::encrypt is on but the IPA_PASSPHRASE secret is empty"
@@ -332,6 +354,17 @@ jobs:
         with:
           name: nxnative-ipa
           path: ${{ env.OUT_FILE }}
+          compression-level: 0
+          retention-days: 3
+
+      # The shader libraries a headless build leaves out of the IPA (dm/tools/msl_id.py staged them: msl.id and the b-<chain> folder; the 7z, when encrypted, holds that folder as msl).
+      # Unzip into a folder named msl and copy it to the app's Documents (Files app), or scripts/push_shaders.sh; the app uses it only when its msl.id is the one the IPA was built with
+      - name: Shader libraries for Documents/msl
+        if: ${{ success() && inputs.shader_mode == 'headless' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nxnative-shaders
+          path: ${{ env.SHADER_OUT }}
           compression-level: 0
           retention-days: 3
 

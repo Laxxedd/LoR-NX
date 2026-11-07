@@ -79,7 +79,7 @@ static void launcher_done(void) { [g_root startGame]; }
         lb.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
         lb.numberOfLines = 0; lb.textAlignment = NSTextAlignmentCenter; lb.textColor = UIColor.whiteColor;
         const char *why = front_ios_boot_message();
-        lb.text = why ? [NSString stringWithFormat:@"Game files unusable.\n%s", why] : @"Game files not found.\nPut the RomFS folder into this App's Documents as \"romfs\" (Files app), then restart.";
+        lb.text = why ? [NSString stringWithFormat:@"%s%s", !strncmp(why, "Shader libraries", 16) ? "" : "Game files unusable.\n", why] : @"Game files not found.\nPut the RomFS folder into this App's Documents as \"romfs\" (Files app), then restart.";
         [self.view addSubview:lb]; return;
     }
     front_ios_audio_watch();
@@ -123,9 +123,9 @@ static void launcher_done(void) { [g_root startGame]; }
 - (void)viewDidAppear:(BOOL)a {
     [super viewDidAppear:a];
     if (!front_ios_boot_ok() && !self.presentedViewController) {   // the game file image is missing or another version (main.m): offer to import one
-        const char *why = front_ios_boot_message();
-        UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Game files" message:why ? @(why) : @"Game files not found. Import the RomFS image (.img), or put the RomFS folder into this App's Documents as \"romfs\" (Files app)." preferredStyle:UIAlertControllerStyleAlert];
-        [a addAction:[UIAlertAction actionWithTitle:@"Import image" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) { (void)x; [self importImage]; }]];
+        const char *why = front_ios_boot_message(); BOOL shaders = why && !strncmp(why, "Shader libraries", 16);   // not the game files: the import offer does not apply
+        UIAlertController *a = [UIAlertController alertControllerWithTitle:shaders ? @"Shader libraries" : @"Game files" message:why ? @(why) : @"Game files not found. Import the RomFS image (.img), or put the RomFS folder into this App's Documents as \"romfs\" (Files app)." preferredStyle:UIAlertControllerStyleAlert];
+        if (!shaders) [a addAction:[UIAlertAction actionWithTitle:@"Import image" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) { (void)x; [self importImage]; }]];
         [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
         [self presentViewController:a animated:YES completion:nil];
     }
