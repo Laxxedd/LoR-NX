@@ -4,7 +4,7 @@ The screen before the game starts shows the settings the game supports. A settin
 
 - [Tested defaults](#tested-defaults)
 - [Game](#game): [Frame rate](#frame-rate), [Render scale](#render-scale), [Console mode](#console-mode), [Upscaling](#upscaling), [Game language](#game-language), [Frame-rate counter](#frame-rate-counter)
-- [Controls](#controls): [Touchscreen Mode](#touchscreen-mode), [Cursor sensitivity](#cursor-sensitivity), [Touch feedback](#touch-feedback), [Hold to confirm + button](#hold-to-confirm--button), [Dedicated B button](#dedicated-b-button)
+- [Controls](#controls): [Touchscreen Mode](#touchscreen-mode), [Pointer Mode](#pointer-mode), [Cursor sensitivity](#cursor-sensitivity), [Touch feedback](#touch-feedback), [Hold to confirm + button](#hold-to-confirm--button), [Dedicated B button](#dedicated-b-button)
 - [Performance](#performance): [Frame buffering](#frame-buffering), [Metal 4 pipelines](#metal-4-pipelines), [Pipeline prebuild](#pipeline-prebuild), [Encode thread](#encode-thread), [Hold frames when late](#hold-frames-when-late), [Performance HUD](#performance-hud), [Reset to tested defaults](#reset-to-tested-defaults)
 - [Memory](#memory): [Extend Memory Usage](#extend-memory-usage), [Reallocate Minimum](#reallocate-minimum)
 - [The Mac settings window](#the-mac-settings-window): [Display mode](#display-mode)
@@ -66,9 +66,13 @@ Shows the frames per second at the top left.
 
 Turns the touch-ui mod (Mods) on by itself, which the mode needs to work, and keeps it on: the mod's switch is greyed out until Touchscreen Mode is off (it then stays on until you turn it off). With it on, the swipe gamepad is replaced by a touchpad and a keyboard: the screen is a trackpad for the game's own mouse cursor (the app draws none; drag to move it, tap for a left click, touch and hold for a right click, swipe up or down with two fingers to scroll), and **Esc** (top left), **Space** (a thin bar at the bottom middle), **Shift**, **Ctrl** and **Alt** (bottom left) are keyboard keys that count as held while a finger is on them. A tap is only ever one click; there is no double-tap hold. **Edit touchscreen layout**, next to the swipe layout editor under Controls, moves, resizes and fades the keys, and is greyed out while Touchscreen Mode is off. It works in Docked mode as well as Handheld. The game's controller interface is turned off by the mod. The mods that open with **R3** (Targetable Mass Attacks, Re-Extraction) open with **Alt** here. **Hold to confirm + button**, **Dedicated B button** and the swipe layout editor belong to the swipe gamepad and are greyed out while it is on. Off by default.
 
+### Pointer Mode
+
+How the touchscreen drives the game's cursor in Touchscreen Mode: **Trackpad** (the default) or **Touch**, a two-way switch shown only while Touchscreen Mode is on. In **Trackpad** the screen is a trackpad: drag to move the cursor, tap for a left click, touch and hold for a right click. In **Touch** the cursor is your finger: it jumps to where you touch and follows the finger. A tap is a left click, a double tap (a second tap soon after the first and close to it) is a right click, and touching and holding is the left button, held until you lift, so moving on drags. Because a tap has to wait for a possible second tap, a single click lands a moment (about a quarter of a second) after the tap. Two fingers moving up or down still scroll, in both modes. The game draws its own cursor image, which would sit beside your finger, so in **Touch** the touch-ui mod keeps it hidden (it blocks the game's calls that set and show the cursor); in **Trackpad** nothing changes. A change takes effect at the next start.
+
 ### Cursor sensitivity
 
-How far the cursor travels for a finger's drag on the touchpad in Touchscreen Mode, from 50 % to 300 % of the normal speed (100 %). Only shown while Touchscreen Mode is on.
+How far the cursor travels for a finger's drag on the touchpad in Touchscreen Mode, from 50 % to 300 % of the normal speed (100 %). Only shown while Touchscreen Mode is on, and greyed out in Touch pointer mode, where the cursor is the finger.
 
 ### Touch feedback
 
@@ -242,6 +246,7 @@ A line like `DM_PRESENT_SNAP=0` in `Documents/env.txt` (in the Files app, under 
 | Cloud saves folder (Mac) | `DM_SAVE_SYNC` | a folder; `icloud`: iCloud Drive › nxnative Saves; `0`: off |
 | Frame-rate counter | `DM_SHOW_FPS` | `1`, `0` |
 | Touchscreen Mode | `DM_TOUCHSCREEN` | `1`, `0` |
+| Pointer Mode | `DM_POINTER_MODE` | `trackpad`, `touch` |
 | Cursor sensitivity | `DM_TRACKPAD_SPEED` | `0.5` to `3.0` |
 | Touch feedback | `DM_TOUCH_HAPTICS` | `1`, `0` |
 | Hold to confirm + button | `DM_HOLD_PLUS` | `1`, `0` |

@@ -214,6 +214,12 @@ void dm_mouse_move(float dx, float dy) {
     g_mdx += nx - g_mx; g_mdy += ny - g_my; g_mx = nx; g_my = ny;
     pthread_mutex_unlock(&g_ml);
 }
+void dm_mouse_set(float x, float y) {   // Touch pointer mode: the cursor is where the finger is (the move since the last position is still reported as the mouse's delta)
+    pthread_mutex_lock(&g_ml);
+    float nx = fminf(fmaxf(x, 0), PANEL_W - 1), ny = fminf(fmaxf(y, 0), PANEL_H - 1);
+    g_mdx += nx - g_mx; g_mdy += ny - g_my; g_mx = nx; g_my = ny;
+    pthread_mutex_unlock(&g_ml);
+}
 void dm_mouse_button(uint32_t mask, int down) {
     pthread_mutex_lock(&g_ml);
     if (down) { g_mheld |= mask; g_mlatch |= mask; g_mflatch |= mask; } else g_mheld &= ~mask;

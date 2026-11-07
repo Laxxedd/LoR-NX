@@ -13,7 +13,7 @@
 #             Reset to tested defaults clears all launcher choices; values fixed by an env file stay
 #   label, note  the setting's name and the line under it (may be empty; only for a setting with a cost: latency, memory, heat)
 #   meta      optional, key=value pairs separated by ; (settings.py META lists the keys; docs/frontends.md, The settings list, describes them):
-#             level=basic  a setting a front end shows first;  needs=<VAR>=<value>  a sub-setting, drawn only while the row that sets <VAR> has that value
+#             level=basic  a setting a front end shows first;  needs=<VAR>=<value>  a sub-setting, drawn only while the row that sets <VAR> has that value;  style=segmented  a choice drawn as a segmented control instead of a menu (for two or three short options)
 DM_FPS_TARGET	choice	30=30 fps,60=60 fps	DM_GAME_FPS_TARGET	DM_GAME_FPS_TARGET!=0	Game	Frame rate		level=basic
 DM_DYNAMIC_RESOLUTION	toggle	-	0	fixups:DYNAMIC_RESOLUTION	Game	Dynamic resolution	Adjusts resolution between 70% and 100% under load. Turn off to keep full resolution for the selected console mode.
 DM_RENDER_SCALE	range	0.5:1.0:0.05	1.0	fixups:RENDER_SCALE	Game	Render scale		level=basic
@@ -24,7 +24,8 @@ DM_FULLSCREEN	choice	0=Window,1=Fullscreen	0	platform:mac	Game	Display mode		lev
 DM_SHOW_FPS	toggle	-	build:DM_SHOW_FPS	platform:ios	Game	Frame-rate counter
 DM_TOUCH_HAPTICS	toggle	-	1	platform:ios	Controls	Touch feedback
 DM_TOUCHSCREEN	toggle	-	0	platform:ios	Controls	Touchscreen Mode	Touchpad-style mouse and a keyboard layout instead of the gamepad. Turns the touch-ui mod on
-DM_TRACKPAD_SPEED	range	0.5:3.0:0.1	1.0	platform:ios	Controls	Cursor sensitivity		needs=DM_TOUCHSCREEN=1
+DM_POINTER_MODE	choice	trackpad=Trackpad,touch=Touch	trackpad	platform:ios	Controls	Pointer Mode	Trackpad: the screen moves the game's cursor like a laptop trackpad. Touch: the cursor is your finger, and the game's own cursor is hidden. Tap clicks, double tap right clicks, hold holds the button.	needs=DM_TOUCHSCREEN=1;style=segmented
+DM_TRACKPAD_SPEED	range	0.5:3.0:0.1	1.0	platform:ios	Controls	Cursor sensitivity		needs=DM_TOUCHSCREEN=1;unless=DM_POINTER_MODE=touch
 DM_HOLD_PLUS	toggle	-	0	platform:ios	Controls	Hold to confirm + button	The **+** button, used to confirm stageplays, burning books, combat phases & other important actions, will only activate if held.	unless=DM_TOUCHSCREEN=1
 DM_DEDICATED_B	toggle	-	0	platform:ios	Controls	Dedicated B button	Adds the B button to the controller scheme rather than using the hold-to-back out gesture.	unless=DM_TOUCHSCREEN=1
 DM_PRESENT_SNAP	toggle	-	DM_GAME_PRESENT_SNAP	gfxapi:nvn	Performance	Frame buffering	Up to one frame more display latency.

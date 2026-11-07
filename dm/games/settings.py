@@ -20,6 +20,7 @@ META = {
     'level': r'basic',                       # a setting a front end shows first; without it, the front end decides
     'needs': r'DM_[A-Z0-9_]+=[^;=]+',        # <VAR>=<value>: a sub-setting, drawn only while the row that sets <VAR> has that value
     'unless': r'DM_[A-Z0-9_]+=[^;=]+',       # <VAR>=<value>: drawn greyed out and unchangeable while the row that sets <VAR> has that value
+    'style': r'segmented',                   # a choice drawn as a segmented control instead of a menu (two or three short options)
 }
 
 

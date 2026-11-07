@@ -49,6 +49,7 @@ enum { DM_MOUSE_LEFT = 1, DM_MOUSE_RIGHT = 2 };
 enum { DM_KEY_CTRL = 1, DM_KEY_SHIFT = 2, DM_KEY_ALT = 4 };
 enum { DM_KEYCODE_ESCAPE = 41, DM_KEYCODE_SPACE = 44 };   // USB usages of the keys dm_key_press takes (the bit numbers of the key set in nn::hid's KeyboardState)
 void dm_mouse_move(float dx, float dy);              // moves the cursor by dx, dy panel pixels
+void dm_mouse_set(float x, float y);               // puts the cursor at x, y panel pixels (Touch pointer mode: the cursor is the finger)
 void dm_mouse_button(uint32_t mask, int down);       // presses or releases the DM_MOUSE_* buttons in mask
 void dm_mouse_wheel(int notches);                    // wheel notches, positive = wheel up (content scrolls toward its top)
 void dm_key_modifier(uint32_t mask, int down);       // presses or releases the DM_KEY_* modifier keys in mask

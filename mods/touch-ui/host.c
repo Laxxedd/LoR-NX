@@ -8,6 +8,7 @@ int dm_opmode(void);
 void dm_nvn_window_size(int *w, int *h);
 
 #define INPUT_PREFIX "UnityEngine.Input::"
+#define CURSOR_PREFIX "UnityEngine.Cursor::"
 
 static int mod_enabled(void) {
     static int on = -1;
@@ -169,11 +170,54 @@ static const struct { const char *name; void (*fn)(void); } k_icalls[] = {
     { "get_mouseScrollDelta_Injected", (void (*)(void))host_get_mouse_scroll_delta },
 };
 
+// Pointer Mode "Touch" (the launcher's DM_POINTER_MODE=touch, with Touchscreen Mode): the cursor is the finger, so the game's own cursor (CursorManager draws its textures with
+// UnityEngine.Cursor.SetCursor and shows them with Cursor.visible) must stay hidden. Both natives are replaced when the icall resolves, in Touch mode only, so Trackpad mode is untouched:
+// SetCursor_Injected(texture, hotspot, mode) does nothing (no cursor image is ever set), and set_visible(bool) hands the engine false whatever the game asks for.
+// Read at the first icall, like the mod's own switch: the launcher's choices are not in the environment yet when constructors run.
+static int pointer_touch(void) {
+    static int on = -1;
+    if (on < 0) {
+        const char *v = getenv("DM_POINTER_MODE");
+        on = v && !strcmp(v, "touch");
+        LOG("[mod touch-ui] pointer mode %s (DM_POINTER_MODE=%s)", on ? "touch: the game's cursor is hidden" : "trackpad", v ? v : "unset");
+    }
+    return on;
+}
+
+static void (*g_real_set_visible)(int);
+
+static void host_cursor_set_cursor(void *texture, void *hotspot, int mode) { (void)texture; (void)hotspot; (void)mode; }
+static void host_cursor_set_visible(int visible) {
+    (void)visible;
+    if (g_real_set_visible) g_real_set_visible(0);
+}
+
+static int on_cursor_icall(const char *name, uint64_t *r) {
+    const char *method = name + sizeof CURSOR_PREFIX - 1;
+    if (!strncmp(method, "SetCursor_Injected", 18) && (method[18] == '\0' || method[18] == '(')) {
+        LOG("[mod touch-ui] %s: icall %#llx replaced, the game's cursor image is never set", name, (unsigned long long)r[0]);
+        r[0] = (uint64_t)(uintptr_t)host_cursor_set_cursor;
+        return 1;
+    }
+    if (!strncmp(method, "set_visible", 11) && (method[11] == '\0' || method[11] == '(')) {
+        LOG("[mod touch-ui] %s: icall %#llx replaced, the game's cursor stays hidden", name, (unsigned long long)r[0]);
+        g_real_set_visible = (void (*)(int))(uintptr_t)r[0];
+        r[0] = (uint64_t)(uintptr_t)host_cursor_set_visible;
+        return 1;
+    }
+    return 0;
+}
+
 static void on_icall_resolved(uint64_t *r, int p) {
     (void)p;
     if (!mod_enabled()) return;
     const char *name = (const char *)(uintptr_t)r[19];
-    if (!name || !r[0] || strncmp(name, INPUT_PREFIX, sizeof INPUT_PREFIX - 1)) return;
+    if (!name || !r[0]) return;
+    if (!strncmp(name, CURSOR_PREFIX, sizeof CURSOR_PREFIX - 1)) {
+        if (dm_touchscreen_mode() && pointer_touch()) on_cursor_icall(name, r);
+        return;
+    }
+    if (strncmp(name, INPUT_PREFIX, sizeof INPUT_PREFIX - 1)) return;
     if (!dm_touchscreen_mode()) return;
     const char *method = name + sizeof INPUT_PREFIX - 1;
     for (size_t i = 0; i < sizeof k_icalls / sizeof k_icalls[0]; i++) {

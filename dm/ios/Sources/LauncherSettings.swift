@@ -8,6 +8,7 @@ struct Setting: Decodable, Identifiable {
     let category: String?  // a mod's group on the iPhone's mods page (LauncherModel.modCategories); absent: Miscellaneous
     let needs: String?     // "<VAR>=<value>": a sub-setting, drawn only while that setting has that value
     let unless: String?    // "<VAR>=<value>": drawn but greyed out and unchangeable while that setting has that value
+    let style: String?     // "segmented": a choice drawn as a segmented control instead of a menu (Pointer Mode)
     let forced: String?    // "<VAR>=<value>" (a mod's switch): turned on and greyed out while that setting has that value (touch-ui while Touchscreen Mode is on)
     let level: String?     // "basic": shown first (the Mac window's Basic settings); any other or none: Advanced settings. The iPhone keeps one list
     let base: Base?        // render scale: the 3D views' size at 1.0, docked and handheld, for the size in pixels (the Mac window)
@@ -34,7 +35,7 @@ struct Setting: Decodable, Identifiable {
         default: return true
         }
     }
-    enum CodingKeys: String, CodingKey { case env, kind, label, note, def = "default", section, category, needs, unless, forced, level, base, options, min, max, step, on, off, format }
+    enum CodingKeys: String, CodingKey { case env, kind, label, note, def = "default", section, category, needs, unless, style, forced, level, base, options, min, max, step, on, off, format }
 }
 struct SettingsFile: Decodable { let settings: [Setting] }
 

@@ -33,6 +33,15 @@ struct SettingRow: View {
     var body: some View {
         Group {
             switch s.kind {
+            case "choice" where s.style == "segmented":
+                VStack(alignment: .leading, spacing: 8) {
+                    settingLabel
+                    Picker(s.label, selection: m.binding(s)) {
+                        ForEach(s.options ?? [], id: \.[0]) { Text($0[1]).tag($0[0]) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                }
             case "choice":
                 Picker(selection: m.binding(s)) {
                     ForEach(s.options ?? [], id: \.[0]) { Text($0[1]).tag($0[0]) }
