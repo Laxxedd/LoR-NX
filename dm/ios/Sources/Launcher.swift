@@ -95,6 +95,9 @@ private struct LauncherView: View {
     @ObservedObject var m: LauncherModel
     let play: () -> Void
     @State private var memory = os_proc_available_memory()
+    @State private var audio = LauncherAudio()   // the launcher's music and the Play sound (LauncherAudio.swift)
+    @State private var starting = false          // Play was pressed: the dice roll and the music fades out before the game starts
+    @Environment(\.scenePhase) private var scenePhase
     private let increasedLimit = dm_has_increased_memory_entitlement()   // fixed for the life of the process
     private let donorEmbedded = dm_ram_donor_embedded()
     private static let memorySection = "Memory"
@@ -248,6 +251,10 @@ private struct LauncherView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .onAppear { audio.startMusic() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { audio.resumeMusic() } else { audio.pauseMusic() }
+        }
         .task {
             while !Task.isCancelled {
                 memory = os_proc_available_memory()
@@ -257,8 +264,15 @@ private struct LauncherView: View {
     }
 
     @ViewBuilder var playButton: some View {
-        let button = Button(action: play) { Text("Play").font(.title3.weight(.semibold)).frame(maxWidth: 220) }.controlSize(.large)
+        let button = Button(action: pressPlay) { Text("Play").font(.title3.weight(.semibold)).frame(maxWidth: 220) }.controlSize(.large).disabled(starting)
         if #available(iOS 26.0, *) { button.buttonStyle(.glassProminent) } else { button.buttonStyle(.borderedProminent) }
+    }
+
+    // Play: the dice sound, then the music fades out, and only then does the game start (a second tap while that runs does nothing)
+    private func pressPlay() {
+        guard !starting else { return }
+        starting = true
+        audio.rollThenFadeOut(done: play)
     }
 
     private func launcherThumbnail() -> UIImage? {

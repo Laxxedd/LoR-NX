@@ -16,6 +16,10 @@ targets:
         excludes: [Info.plist]  # generated per project under Gen/, so games never share the generated plist
       - path: Resources/LauncherThumbnail.png   # the launcher's thumbnail (Launcher.swift); the app icon is used when it is missing
         buildPhase: resources
+      - path: Resources/LauncherBGM.m4a   # the launcher's looping music, the first 1:30 of the track (LauncherAudio.swift)
+        buildPhase: resources
+      - path: Resources/LauncherDiceRoll.wav   # the sound Play makes before the music fades out (LauncherAudio.swift)
+        buildPhase: resources
       - path: Gen/embed.S
       - path: Gen/dm          # Rewriter tables (*.fixups.tsv / gates / cuts / obs) + shader map / c1 list / warm-up list
         type: folder
