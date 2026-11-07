@@ -64,7 +64,7 @@ Shows the frames per second at the top left.
 
 ### Touchscreen Mode
 
-Turns the touch-ui mod (Mods) on by itself, which the mode needs to work, and keeps it on: the mod's switch is greyed out until Touchscreen Mode is off (it then stays on until you turn it off). With it on, the swipe gamepad is replaced by a touchpad and a keyboard: the screen is a trackpad for the game's own mouse cursor (the app draws none; drag to move it, tap for a left click, touch and hold for a right click, swipe up or down with two fingers to scroll), and **Shift**, **Ctrl** and **Alt** are keys at the bottom left that count as held while a finger is on them. It works in Docked mode as well as Handheld. The game's controller interface is turned off by the mod. The mods that open with **R3** (Targetable Mass Attacks, Re-Extraction) open with **Alt** here. **Hold to confirm + button**, **Dedicated B button** and the swipe layout editor belong to the swipe gamepad and are greyed out while it is on. Off by default.
+Turns the touch-ui mod (Mods) on by itself, which the mode needs to work, and keeps it on: the mod's switch is greyed out until Touchscreen Mode is off (it then stays on until you turn it off). With it on, the swipe gamepad is replaced by a touchpad and a keyboard: the screen is a trackpad for the game's own mouse cursor (the app draws none; drag to move it, tap for a left click, touch and hold for a right click, swipe up or down with two fingers to scroll), and **Esc** (top left), **Space** (a thin bar at the bottom middle), **Shift**, **Ctrl** and **Alt** (bottom left) are keyboard keys that count as held while a finger is on them. A tap is only ever one click; there is no double-tap hold. **Edit touchscreen layout**, next to the swipe layout editor under Controls, moves, resizes and fades the keys, and is greyed out while Touchscreen Mode is off. It works in Docked mode as well as Handheld. The game's controller interface is turned off by the mod. The mods that open with **R3** (Targetable Mass Attacks, Re-Extraction) open with **Alt** here. **Hold to confirm + button**, **Dedicated B button** and the swipe layout editor belong to the swipe gamepad and are greyed out while it is on. Off by default.
 
 ### Cursor sensitivity
 
@@ -72,7 +72,7 @@ How far the cursor travels for a finger's drag on the touchpad in Touchscreen Mo
 
 ### Touch feedback
 
-A light tap from the phone when you press an on-screen button. In Touchscreen Mode it plays for a click, a right click, each scroll step and the Shift, Ctrl and Alt keys.
+A light tap from the phone when you press an on-screen button. In Touchscreen Mode it plays for a click, a right click, each scroll step and each key.
 
 ### Hold to confirm + button
 

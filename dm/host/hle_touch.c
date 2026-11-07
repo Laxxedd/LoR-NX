@@ -182,10 +182,10 @@ int gesture_fill(void *out, int n, uint64_t now_ns) {
     return k;
 }
 
-// Virtual mouse and keyboard modifiers (Touchscreen Mode, front.h): the iOS touchpad moves a cursor on the 1280x720 panel and presses the mouse buttons / wheel, and its Shift / Ctrl / Alt keys are the keyboard's modifier keys.
+// Virtual mouse and keyboard keys (Touchscreen Mode, front.h): the iOS touchpad moves a cursor on the 1280x720 panel and presses the mouse buttons / wheel, and its Shift / Ctrl / Alt keys are the keyboard's modifier keys; its Esc and Space keys are ordinary keys of the key bit set.
 // hle_hid.c answers nn::hid::GetMouseState(s) and GetKeyboardState(s) from them while DM_TOUCHSCREEN=1 and keeps its "not connected" answers otherwise.
 // MouseState (0x28 bytes): +0 sampling number, +8 x, +0xc y, +0x10 delta x, +0x14 delta y, +0x18 wheel delta x, +0x1c wheel delta y, +0x20 buttons (bit0 left, bit1 right), +0x24 attributes (bit0 transferable, bit1 connected).
-// KeyboardState (0x30 bytes, = libnx HidKeyboardState): +0 sampling number, +8 modifiers (bit0 Control, bit1 Shift, bit2 left Alt), +0x10 key bit set (bit n = USB usage n: left Control 224, left Shift 225, left Alt 226).
+// KeyboardState (0x30 bytes, = libnx HidKeyboardState): +0 sampling number, +8 modifiers (bit0 Control, bit1 Shift, bit2 left Alt), +0x10 key bit set (bit n = USB usage n: Escape 41, Space 44, left Control 224, left Shift 225, left Alt 226).
 // Movement, wheel and short presses are handed over once: what happened since the last read is in the newest entry, the older entries repeat the buttons of the read before it with no movement.
 #define PANEL_W 1280
 #define PANEL_H 720
@@ -194,6 +194,7 @@ static float g_mx = PANEL_W / 2, g_my = PANEL_H / 2, g_mdx, g_mdy;   // the curs
 static int g_mwy;                                                    // wheel notches not yet read
 static uint32_t g_mheld, g_mlatch, g_mprev;                          // mouse buttons: held now, pressed since the last read, reported by the last read
 static uint32_t g_kheld, g_klatch, g_kprev;                          // keyboard modifiers, the same way
+static uint32_t g_kkheld[8], g_kklatch[8], g_kkprev[8];              // the other keys, one bit per USB usage 0..255 (bit n = word n / 32, bit n % 32), the same way
 static uint32_t g_mflatch, g_mfprev; static int32_t g_mfwheel; static uint64_t g_mfframe; static int g_mfvalid; static dm_mouse_frame_t g_mfsnap;
 
 static int trackpad_on(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_TOUCHSCREEN"); v = e && atoi(e); } return v; }
@@ -222,6 +223,15 @@ void dm_mouse_wheel(int notches) { pthread_mutex_lock(&g_ml); g_mwy += notches; 
 void dm_key_modifier(uint32_t mask, int down) {
     pthread_mutex_lock(&g_ml);
     if (down) { g_kheld |= mask; g_klatch |= mask; } else g_kheld &= ~mask;
+    pthread_mutex_unlock(&g_ml);
+}
+
+// A key of the key bit set other than the modifiers (usage = its USB usage: DM_KEYCODE_*): held while down, and a press and release between two reads is still reported once
+void dm_key_press(uint32_t usage, int down) {
+    if (usage >= 256) return;
+    uint32_t w = usage / 32, b = 1u << (usage % 32);
+    pthread_mutex_lock(&g_ml);
+    if (down) { g_kkheld[w] |= b; g_kklatch[w] |= b; } else g_kkheld[w] &= ~b;
     pthread_mutex_unlock(&g_ml);
 }
 
@@ -267,16 +277,18 @@ int keyboard_fill(void *out, int n, int64_t top) {
     if (!trackpad_on() || n <= 0) return 0;
     uint8_t *o = out;
     pthread_mutex_lock(&g_ml);
-    uint32_t now = g_kheld | g_klatch;
+    uint32_t now = g_kheld | g_klatch, nowk[8];
+    for (int w = 0; w < 8; w++) nowk[w] = g_kkheld[w] | g_kklatch[w];
     for (int i = 0; i < n; i++) {
         uint32_t m = i ? g_kprev : now;   // DM_KEY_CTRL / SHIFT / ALT are bits 0 / 1 / 2, as are the modifier bits and the key bits 224 / 225 / 226
+        const uint32_t *kk = i ? g_kkprev : nowk;
         uint64_t mods = m & 7; int64_t samp = top - i;
+        uint32_t keys[8]; memcpy(keys, kk, sizeof keys); keys[7] |= m & 7;   // little endian: bit n of the 256-bit set is bit n % 32 of word n / 32
         uint8_t *s = o + 0x30 * (size_t)i;
         memset(s, 0, 0x30);
-        memcpy(s, &samp, 8); memcpy(s + 8, &mods, 8);
-        s[0x10 + 224 / 8] = (uint8_t)(m & 7);
+        memcpy(s, &samp, 8); memcpy(s + 8, &mods, 8); memcpy(s + 0x10, keys, 32);
     }
-    g_kprev = now; g_klatch = 0;
+    g_kprev = now; memcpy(g_kkprev, nowk, sizeof g_kkprev); g_klatch = 0; memset(g_kklatch, 0, sizeof g_kklatch);
     pthread_mutex_unlock(&g_ml);
     return n;
 }

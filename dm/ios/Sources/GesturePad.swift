@@ -13,7 +13,7 @@
 //    - Right stick     a scroller: while a finger holds it, moving that finger up or down tilts the right stick, and swipes made elsewhere with another finger move the stick instead of the D-pad
 //    - Swipe lock      toggle. Locked = one D-pad press per swipe, unlocked = several presses per swipe
 //
-// Button positions, sizes and opacity are edited in GestureLayoutEditor.swift (Launcher > Controls > Edit swipe layout) and kept in UserDefaults.
+// Button positions, sizes and opacity are edited in GestureLayoutEditor.swift (Launcher > Controls > Edit swipe layout) and kept in UserDefaults. Touchscreen Mode has its own layout, for its keys (TouchscreenLayout.swift).
 // Presses reach the host through dm_gesture_button / dm_gesture_stick (DmGamepad.m), which publish them next to the other touch controls.
 import SwiftUI
 import UIKit
@@ -178,7 +178,7 @@ struct GestureControllerView: UIViewRepresentable {
 // MARK: - Editor grid
 
 /// Full-screen grid shown behind the controls while editing. It is drawn by the editing view itself so it always lines up with the snapping.
-private final class GestureGridView: UIView {
+final class GestureGridView: UIView {   // also the touchscreen layout editor's grid (TouchscreenLayoutEditor.swift)
     /// Every this many cells a heavier line marks a block, so the fine grid stays readable.
     private let majorEvery = 8
     var cell: CGFloat = 16 { didSet { if oldValue != cell { setNeedsDisplay() } } }

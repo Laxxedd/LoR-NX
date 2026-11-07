@@ -14,7 +14,8 @@
 //   The virtual gamepad (layout button included) hides while a physical controller is connected and comes back when it is removed; meanwhile every touch goes to the game. Physical controllers keep every button (D-pad and right stick included) and map by position: bottom = B, right = A, left = Y, top = X (same positions as on a Switch controller); a Nintendo pad maps by its labels (pad_apple.h).
 //   Each physical controller is a player of its own (local co-op), as on the Mac: the first one connected is player 1, together with the touch gamepad, the next player 2, and so on up to 8; see "Physical controllers" below.
 //   Touchscreen Mode (DM_TOUCHSCREEN=1) replaces all of it: the screen is a touchpad for the game's mouse (tsBegan below: one finger drags the cursor, a tap is the left button, a hold the right button, two fingers moving up or down scroll the wheel;
-//     the app draws no cursor: the game's own is moved by the mouse; the left click reaches the game as a touch-screen press at the cursor, since the touch-ui mod makes the game read the touch screen: hle_touch.c trackpad_touch) and Shift / Ctrl / Alt keys at the bottom left are the keyboard's modifiers (front.h dm_mouse_*, dm_key_modifier). Clicks, scroll steps and the keys give a haptic tap while DM_TOUCH_HAPTICS is on.
+//     the app draws no cursor: the game's own is moved by the mouse; the left click reaches the game as a touch-screen press at the cursor, since the touch-ui mod makes the game read the touch screen: hle_touch.c trackpad_touch) and Esc, Space, Shift, Ctrl and Alt are the keyboard's keys (front.h dm_mouse_*, dm_key_modifier, dm_key_press), placed by the launcher's touchscreen layout editor (Launcher.swift, TouchscreenLayoutEditor.swift): Esc at the top left, a thin wide Space at the bottom middle and the three modifiers at the bottom left
+//     unless the player moved them. Clicks, scroll steps and the keys give a haptic tap while DM_TOUCH_HAPTICS is on.
 //   Shaking the phone shakes the controller (DM_BTN_SHAKE: its six-axis sensor, hle_hid.c), whichever controls are in use; see "Shaking the phone" below.
 #import <UIKit/UIKit.h>
 #import <GameController/GameController.h>
@@ -141,21 +142,33 @@ static const CGFloat
     K_RSTICK_R = 60,                                // right stick (not drawn): radius around its centre, the touch-down point
     K_RSWIPE = 1.0 / 3,                             // right stick area: this fraction of the screen width from the right edge (not in u)
     K_CLICK_X = 102, K_CLICK_R = 17;                // L3 / R3: centre from the outer edge (level with ZL / ZR), radius
-// Touchscreen Mode: the touchpad (points) and the Shift / Ctrl / Alt keys (u)
+// Touchscreen Mode: the touchpad (points) and the keys (u)
 static const CGFloat
     K_TP_GAIN = 1.5,                                // cursor speed: panel pixels per screen pixel of the picture, times this (and times the launcher's Cursor sensitivity)
     K_TP_SLOP = 9,                                  // a finger that stays within this many points of where it landed has not moved (a tap, or a hold)
     K_TP_STEP = 26,                                 // two fingers travelling this many points up or down scroll the wheel one notch
-    K_KB_W = 62, K_KB_H = 50, K_KB_GAP = 8,         // the modifier keys: square-ish, side by side
-    K_KB_X = 22, K_KB_Y = 20, K_KB_R = 8;           // the first key's distance from the left edge and the bottom, corner radius
+    K_KB_GAP = 8, K_KB_R = 8,                       // the keys' hit areas reach half this far beyond them; the corner radius of the squircle keys
+    K_KB_HIT = 44;                                  // a key is at least this big to hit, however small it is drawn (the thin Space key is 4 points tall)
 static const NSTimeInterval K_TP_HOLD = 0.45;       // a finger held still this long is the right button
-static const CFTimeInterval K_TP_DRAG = 0.30;
-static const uint32_t k_kbMask[3] = {DM_KEY_SHIFT, DM_KEY_CTRL, DM_KEY_ALT};   // left to right
+// The touchscreen keys, in the order of TouchscreenLayout.swift's TouchKey (position, size and opacity come from there: dm_ts_key_frame / dm_ts_key_opacity)
+enum { TS_SHIFT, TS_CTRL, TS_ALT, TS_ESC, TS_SPACE, TS_N };
+static NSString *const k_tsNames[TS_N] = {@"Shift", @"Ctrl", @"Alt", @"Esc", nil};   // Space is a thin bar with no label
+static void ts_key(int k, int down) {
+    switch (k) {
+    case TS_SHIFT: dm_key_modifier(DM_KEY_SHIFT, down); break;
+    case TS_CTRL: dm_key_modifier(DM_KEY_CTRL, down); break;
+    case TS_ALT: dm_key_modifier(DM_KEY_ALT, down); break;
+    case TS_ESC: dm_key_press(DM_KEYCODE_ESCAPE, down); break;
+    case TS_SPACE: dm_key_press(DM_KEYCODE_SPACE, down); break;
+    }
+}
 static const int k_btns[] = {B_ZL, B_L, B_ZR, B_R, B_MINUS, B_PLUS, B_LS, B_RS};   // keys locked at touch-down (L3 / R3 only in the 3D layout)
 int dm_opmode(void);   // hle_oe.c: 0 = handheld
 void *dm_gesture_view_make(void);   // GesturePad.swift: the Swipe layout's view, returned retained
 void dm_gesture_view_release_inputs(void *view);   // lets go of every button and the stick it holds
 void dm_gesture_view_set_passthrough(void *view, CGRect rect);   // touches inside rect go to the views below (the layout button)
+CGRect dm_ts_key_frame(int key, CGSize bounds, double unit);   // TouchscreenLayout.swift: where a touchscreen key sits on a screen of that size (the player's layout, else the default one), unit = u
+double dm_ts_key_opacity(int key);   // ...and how opaque it is, 0.1 to 1
 
 @interface DmGamepad : UIView
 @end
@@ -179,17 +192,18 @@ static void pads_start(void);   // Physical controllers, below
     BOOL _padOff;                                  // a physical controller is connected: every touch goes to the game
     UITouch *_game[16];                            // touches on the game's touch screen by finger slot
     CALayer *_tsLayer;                             // Touchscreen Mode's layer (the keys), over the picture; hidden otherwise
-    CAShapeLayer *_kbKey[3]; CATextLayer *_kbLabel[3];
-    UITouch *_kbTouch[3];                          // the finger holding each modifier key
+    CAShapeLayer *_kbKey[TS_N]; CATextLayer *_kbLabel[TS_N];
+    UITouch *_kbTouch[TS_N];                       // the finger holding each key
+    CGRect _kbFrame[TS_N];                         // where each key is now: the layout's answer at the last layout pass, so a touch-down does not ask for it again
     NSMutableArray<UITouch *> *_pad;               // the fingers on the touchpad in the order they landed (the first two count)
     CGPoint _padStart, _padLast; BOOL _padMoved, _padDead, _padRight;   // one finger: where it landed / was last applied, moved past the slop, the gesture is over (two fingers were down: nothing more until all lift), the right button is held
     CGFloat _padScroll, _padScrollY;               // two fingers: vertical travel not yet turned into a notch, their mid point's last y
     NSTimer *_padTimer; NSUInteger _lmbEpoch;      // the hold timer; counts left clicks so an old release cannot let go of a newer press
-    BOOL _padDrag; CFTimeInterval _padTapAt;
     UIImpactFeedbackGenerator *_clickFeedback, *_rightFeedback; UISelectionFeedbackGenerator *_scrollFeedback;
 }
 
 static UIColor *k_idle, *k_on, *k_line, *k_ringFill, *k_text, *k_textOn;
+static UIColor *k_kbIdle, *k_kbOn, *k_kbLine, *k_kbLineOn, *k_kbText, *k_kbTextOn;   // the touchscreen keys: the swipe gamepad's outline look (GesturePad.swift ControlView.refresh), a 1 point border and almost no fill
 static CAShapeLayer *shape(CALayer *parent) {
     CAShapeLayer *l = [CAShapeLayer layer];
     l.fillColor = k_idle.CGColor; l.strokeColor = k_line.CGColor; l.lineWidth = 1.5;
@@ -229,6 +243,9 @@ static BOOL fullOnly(int b) { return b == B_LS || b == B_RS || b >= B_LEFT; }   
             // each colour carries its own low opacity instead of lowering the whole view's alpha (that would add an off-screen pass for the full-screen layer)
             k_idle = [UIColor colorWithWhite:1 alpha:0.14]; k_on = [UIColor colorWithWhite:1 alpha:0.45]; k_line = [UIColor colorWithWhite:1 alpha:0.38];
             k_ringFill = [UIColor colorWithWhite:1 alpha:0.06]; k_text = [UIColor colorWithWhite:1 alpha:0.6]; k_textOn = [UIColor colorWithWhite:0 alpha:0.7];
+            k_kbIdle = [UIColor colorWithWhite:1 alpha:0.04]; k_kbOn = [UIColor colorWithWhite:1 alpha:0.30];
+            k_kbLine = [UIColor colorWithWhite:1 alpha:0.42]; k_kbLineOn = [UIColor colorWithWhite:1 alpha:0.95];
+            k_kbText = [UIColor colorWithWhite:1 alpha:0.85]; k_kbTextOn = [UIColor colorWithWhite:1 alpha:1];
         });
         _controls = [CALayer layer]; [self.layer addSublayer:_controls];
         _ring = shape(_controls); _ring.fillColor = k_ringFill.CGColor;
@@ -241,8 +258,11 @@ static BOOL fullOnly(int b) { return b == B_LS || b == B_RS || b >= B_LEFT; }   
             if (names[b]) _label[b] = label(_key[b], names[b]);   // the D-pad arms carry no label
         }
         _tsLayer = [CALayer layer]; _tsLayer.hidden = !touchscreen_mode(); [self.layer addSublayer:_tsLayer];
-        static NSString *const kbNames[3] = {@"Shift", @"Ctrl", @"Alt"};
-        for (int i = 0; i < 3; i++) { _kbKey[i] = shape(_tsLayer); _kbLabel[i] = label(_kbKey[i], kbNames[i]); }
+        for (int i = 0; i < TS_N; i++) {
+            _kbKey[i] = shape(_tsLayer);
+            _kbKey[i].lineWidth = 1; _kbKey[i].shadowOpacity = 0;   // thin and flat, not the gamepad keys' 1.5 point line and soft shadow
+            _kbLabel[i] = label(_kbKey[i], k_tsNames[i] ?: @""); _kbLabel[i].hidden = k_tsNames[i] == nil;
+        }
         _gesture = YES;
         [self applyLayout];
         NSNotificationCenter *nc = NSNotificationCenter.defaultCenter;
@@ -431,17 +451,23 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
 - (void)touchesCancelled:(NSSet<UITouch *> *)ts withEvent:(UIEvent *)e { if (touchscreen_mode()) [self tsEnded:ts cancelled:YES]; else [self endTouches:ts]; }
 
 // ---- Touchscreen Mode: touchpad and keyboard ----
-// The touches that land on a modifier key hold it (locked at touch-down, like the gamepad's keys); every other touch is the touchpad. One finger: it drags the cursor once it has left the slop; lifting it unmoved is a left click, and holding it
-// unmoved for K_TP_HOLD presses the right button until it lifts (moving on then drags with it). A second finger ends all of that and makes the pair a wheel: their mid point's vertical travel turns into notches (down = wheel up, as
-// dragging a page down shows what is above), and the gesture stays over until every finger has lifted. Each click, each notch and each key press gives a haptic tap. A third finger does nothing.
-- (CGRect)kbRect:(int)i { CGRect s = self.corner; CGFloat u = self.u, w = K_KB_W * u, h = K_KB_H * u, g = K_KB_GAP * u;
-    return CGRectMake(CGRectGetMinX(s) + K_KB_X * u + i * (w + g), CGRectGetMaxY(s) - K_KB_Y * u - h, w, h); }
-- (int)kbAt:(CGPoint)p { CGFloat m = K_KB_GAP * self.u / 2 - 0.5;   // half the gap beyond a key, so the keys' hit areas touch but never overlap
-    for (int i = 0; i < 3; i++) if (CGRectContainsPoint(CGRectInset([self kbRect:i], -m, -m), p)) return i;
-    return -1; }
+// The touches that land on a key hold it (locked at touch-down, like the gamepad's keys): a modifier or Esc / Space, placed by the touchscreen layout (TouchscreenLayout.swift); every other touch is the touchpad. One finger: it drags the cursor once it has left the slop;
+// lifting it unmoved is a left click, and holding it unmoved for K_TP_HOLD presses the right button until it lifts (moving on then drags with it). A second finger ends all of that and makes the pair a wheel: their mid point's vertical travel
+// turns into notches (down = wheel up, as dragging a page down shows what is above), and the gesture stays over until every finger has lifted. Each click, each notch and each key press gives a haptic tap. A third finger does nothing.
+- (CGRect)kbRect:(int)i { return _kbFrame[i]; }
+- (int)kbAt:(CGPoint)p {   // the key whose hit area holds the point (nearest centre when two do): at least K_KB_HIT either way, and half the gap beyond that, so neighbouring hit areas touch but hardly overlap
+    CGFloat m = K_KB_GAP * self.u / 2 - 0.5; int best = -1; CGFloat bd = CGFLOAT_MAX;
+    for (int i = 0; i < TS_N; i++) {
+        CGRect r = [self kbRect:i]; CGPoint c = CGPointMake(CGRectGetMidX(r), CGRectGetMidY(r));
+        r = CGRectInset(r, -(MAX(K_KB_HIT - r.size.width, 0) / 2 + m), -(MAX(K_KB_HIT - r.size.height, 0) / 2 + m));
+        if (!CGRectContainsPoint(r, p)) continue;
+        CGFloat d = dist(p, c); if (d < bd) { bd = d; best = i; }
+    }
+    return best; }
 - (void)refreshKeys {
     [CATransaction begin]; [CATransaction setDisableActions:YES];
-    for (int i = 0; i < 3; i++) { BOOL on = _kbTouch[i] != nil; _kbKey[i].fillColor = (on ? k_on : k_idle).CGColor; _kbLabel[i].foregroundColor = (on ? k_textOn : k_text).CGColor; }
+    for (int i = 0; i < TS_N; i++) { BOOL on = _kbTouch[i] != nil;
+        _kbKey[i].fillColor = (on ? k_kbOn : k_kbIdle).CGColor; _kbKey[i].strokeColor = (on ? k_kbLineOn : k_kbLine).CGColor; _kbLabel[i].foregroundColor = (on ? k_kbTextOn : k_kbText).CGColor; }
     [CATransaction commit];
 }
 - (CGRect)picture {   // the 16:9 picture that front_ios.m centres in the screen, as pushGame maps touches onto it
@@ -453,11 +479,10 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
 - (void)padHold:(NSTimer *)timer {
     _padTimer = nil;
     if (_pad.count != 1 || _padMoved || _padDead || _padRight) return;
-    _padRight = YES; _padTapAt = 0; dm_mouse_button(DM_MOUSE_RIGHT, 1);
+    _padRight = YES; dm_mouse_button(DM_MOUSE_RIGHT, 1);
     [_rightFeedback impactOccurred]; [_rightFeedback prepare];
 }
 - (void)padClick {
-    _padTapAt = CACurrentMediaTime();
     dm_mouse_button(DM_MOUSE_LEFT, 1);
     [_clickFeedback impactOccurredWithIntensity:0.8]; [_clickFeedback prepare];
     NSUInteger epoch = ++_lmbEpoch;
@@ -469,7 +494,7 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
         int k = [self kbAt:[t locationInView:self]];
         if (k >= 0) {
             if (_kbTouch[k]) continue;
-            _kbTouch[k] = t; dm_key_modifier(k_kbMask[k], 1); [self refreshKeys];
+            _kbTouch[k] = t; ts_key(k, 1); [self refreshKeys];
             [_touchFeedback impactOccurredWithIntensity:0.6]; [_touchFeedback prepare];
             continue;
         }
@@ -478,15 +503,9 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
         if (_pad.count == 1) {
             _padStart = _padLast = [t locationInView:self]; _padMoved = _padDead = _padRight = NO;
             [self padCancelHold];
-            if (_padTapAt > 0 && CACurrentMediaTime() - _padTapAt <= K_TP_DRAG) {
-                _padTapAt = 0; _padDrag = YES; _lmbEpoch++;
-                dm_mouse_button(DM_MOUSE_LEFT, 1);
-                [_clickFeedback impactOccurredWithIntensity:0.8]; [_clickFeedback prepare];
-            } else _padTimer = [NSTimer scheduledTimerWithTimeInterval:K_TP_HOLD target:self selector:@selector(padHold:) userInfo:nil repeats:NO];
+            _padTimer = [NSTimer scheduledTimerWithTimeInterval:K_TP_HOLD target:self selector:@selector(padHold:) userInfo:nil repeats:NO];
         } else {   // the second finger: no click or hold any more, a wheel instead
             [self padCancelHold];
-            _padTapAt = 0;
-            if (_padDrag) { _padDrag = NO; dm_mouse_button(DM_MOUSE_LEFT, 0); }
             if (_padRight) { dm_mouse_button(DM_MOUSE_RIGHT, 0); _padRight = NO; }
             _padDead = YES; _padScroll = 0; _padScrollY = [self padMidY];
         }
@@ -512,12 +531,11 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
 }
 - (void)tsEnded:(NSSet<UITouch *> *)ts cancelled:(BOOL)cancelled {
     for (UITouch *t in ts) {
-        for (int k = 0; k < 3; k++) if (_kbTouch[k] == t) { _kbTouch[k] = nil; dm_key_modifier(k_kbMask[k], 0); [self refreshKeys]; }
+        for (int k = 0; k < TS_N; k++) if (_kbTouch[k] == t) { _kbTouch[k] = nil; ts_key(k, 0); [self refreshKeys]; }
         if (![_pad containsObject:t]) continue;
         if (_pad.count == 1) {   // the last finger lifts
             [self padCancelHold];
-            if (_padDrag) { _padDrag = NO; dm_mouse_button(DM_MOUSE_LEFT, 0); }
-            else if (_padRight) { dm_mouse_button(DM_MOUSE_RIGHT, 0); _padRight = NO; }
+            if (_padRight) { dm_mouse_button(DM_MOUSE_RIGHT, 0); _padRight = NO; }
             else if (!_padMoved && !_padDead && !cancelled) [self padClick];
             _padDead = NO;
         }
@@ -526,10 +544,9 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
 }
 - (void)tsReset {   // lets go of everything the touchpad and the keys hold
     [self padCancelHold];
-    for (int k = 0; k < 3; k++) if (_kbTouch[k]) { _kbTouch[k] = nil; dm_key_modifier(k_kbMask[k], 0); }
+    for (int k = 0; k < TS_N; k++) if (_kbTouch[k]) { _kbTouch[k] = nil; ts_key(k, 0); }
     if (_padRight) { _padRight = NO; dm_mouse_button(DM_MOUSE_RIGHT, 0); }
     if (touchscreen_mode()) { _lmbEpoch++; dm_mouse_button(DM_MOUSE_LEFT, 0); }
-    _padDrag = NO; _padTapAt = 0;
     [_pad removeAllObjects]; _padMoved = _padDead = NO;
     [self refreshKeys];
 }
@@ -565,6 +582,16 @@ static void placeLabel(CATextLayer *t, CGPoint c, CGFloat fs) {
     CFRelease(f);
 }
 
+static void placeKeyLabel(CATextLayer *t, CGPoint c, CGFloat fs) {   // medium weight, as the gamepad's outlined buttons (GesturePad.swift)
+    CTFontRef base = CTFontCreateUIFontForLanguage(kCTFontUIFontSystem, fs, NULL), f = base;
+    CTFontDescriptorRef d = CTFontDescriptorCreateWithAttributes((__bridge CFDictionaryRef)@{(id)kCTFontTraitsAttribute: @{(id)kCTFontWeightTrait: @(UIFontWeightMedium)}});
+    CTFontRef m = base && d ? CTFontCreateCopyWithAttributes(base, fs, NULL, d) : NULL; if (m) f = m;
+    t.font = f; t.fontSize = fs;
+    CGFloat h = f ? CTFontGetAscent(f) + CTFontGetDescent(f) + CTFontGetLeading(f) : fs * 1.2, w = fs * 4;
+    t.frame = CGRectMake(c.x - w / 2, c.y - h / 2, w, h);
+    if (m) CFRelease(m); if (d) CFRelease(d); if (base) CFRelease(base);
+}
+
 - (void)layoutSubviews {
     [super layoutSubviews];
     UIWindowScene *ws = self.window.windowScene; if (ws) atomic_store(&g_iface_orient, (int)ws.effectiveGeometry.interfaceOrientation);
@@ -572,7 +599,11 @@ static void placeLabel(CATextLayer *t, CGPoint c, CGFloat fs) {
     [CATransaction begin]; [CATransaction setDisableActions:YES];
     _controls.frame = self.layer.bounds;
     _tsLayer.frame = self.layer.bounds;
-    for (int i = 0; i < 3; i++) { CGRect rc = [self kbRect:i]; setPath(_kbKey[i], CGPathCreateWithRoundedRect(rc, K_KB_R * u, K_KB_R * u, NULL)); placeLabel(_kbLabel[i], CGPointMake(CGRectGetMidX(rc), CGRectGetMidY(rc)), 15 * u); }
+    for (int i = 0; i < TS_N; i++) {   // the squircle keys; Space is a thin bar with round ends
+        CGRect rc = _kbFrame[i] = dm_ts_key_frame(i, self.bounds.size, u); CGFloat r = i == TS_SPACE ? rc.size.height / 2 : K_KB_R * u;
+        setPath(_kbKey[i], CGPathCreateWithRoundedRect(rc, r, r, NULL)); _kbKey[i].opacity = (float)dm_ts_key_opacity(i);
+        if (i != TS_SPACE) placeKeyLabel(_kbLabel[i], CGPointMake(CGRectGetMidX(rc), CGRectGetMidY(rc)), MAX(11, MIN(rc.size.height * 0.4, 24)));
+    }
     for (int b = B_A; b <= B_Y; b++) { CGPoint c = [self facePos:b]; setPath(_key[b], circlePath(c, self.faceR)); placeLabel(_label[b], c, 20 * u); }
     for (int i = 0; i < (int)(sizeof k_btns / sizeof *k_btns); i++) { int b = k_btns[i];
         if (isDrop(b)) {

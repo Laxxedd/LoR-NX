@@ -1,4 +1,4 @@
-// Touchscreen Mode's virtual mouse and keyboard modifiers: dm_mouse_* / dm_key_modifier -> mouse_fill / keyboard_fill, checked against hand-written byte layouts
+// Touchscreen Mode's virtual mouse and keyboard keys (modifiers, Esc, Space): dm_mouse_* / dm_key_modifier / dm_key_press -> mouse_fill / keyboard_fill, checked against hand-written byte layouts
 // (MouseState 0x28 bytes, KeyboardState 0x30 bytes). Runs with DM_TOUCHSCREEN=1 set by the test itself: plain (the left click is a mouse button), and as `t_mouse touch` with DM_TRACKPAD_TOUCH=1 (the left button is also a touch-screen press at the cursor).
 #include <stdio.h>
 #include <stdlib.h>
@@ -6,10 +6,12 @@
 #include <stdint.h>
 enum { DM_MOUSE_LEFT = 1, DM_MOUSE_RIGHT = 2 };
 enum { DM_KEY_CTRL = 1, DM_KEY_SHIFT = 2, DM_KEY_ALT = 4 };
+enum { DM_KEYCODE_ESCAPE = 41, DM_KEYCODE_SPACE = 44 };
 void dm_mouse_move(float dx, float dy);
 void dm_mouse_button(uint32_t mask, int down);
 void dm_mouse_wheel(int notches);
 void dm_key_modifier(uint32_t mask, int down);
+void dm_key_press(uint32_t usage, int down);
 int mouse_fill(void *out, int n, int64_t top);
 int keyboard_fill(void *out, int n, int64_t top);
 typedef struct { float nx, ny; uint32_t held, down, up; int32_t wheel; } frame_t;
@@ -80,6 +82,21 @@ int main(int argc, char **argv) {
     dm_key_modifier(DM_KEY_ALT, 1); dm_key_modifier(DM_KEY_ALT, 0);
     check("a short Alt press between two reads is still seen once", keyboard_fill(k, 2, 210) == 1 + 1 && *(uint64_t *)(k + 8) == 4 && *(uint64_t *)(k + 0x30 + 8) == 7 && *(int64_t *)(k + 0x30) == 209);
     check("then released", keyboard_fill(k, 1, 211) == 1 && *(uint64_t *)(k + 8) == 0);
+    // Esc and Space are plain keys of the key bit set (USB usages 41 and 44, both in byte 5), beside the modifiers' bits 224..226
+    #define KEY(entry, usage) ((k[0x30 * (entry) + 0x10 + (usage) / 8] >> ((usage) % 8)) & 1)
+    dm_key_press(DM_KEYCODE_ESCAPE, 1);
+    check("Esc: key 41 set, Space and the modifiers not", keyboard_fill(k, 1, 220) == 1 && *(uint64_t *)(k + 8) == 0 && KEY(0, 41) && !KEY(0, 44) && !KEY(0, 225));
+    dm_key_press(DM_KEYCODE_SPACE, 1); dm_key_modifier(DM_KEY_SHIFT, 1);
+    check("Esc, Space and Shift together", keyboard_fill(k, 1, 221) == 1 && *(uint64_t *)(k + 8) == 2 && KEY(0, 41) && KEY(0, 44) && KEY(0, 225) && !KEY(0, 224));
+    dm_key_press(DM_KEYCODE_ESCAPE, 0); dm_key_press(DM_KEYCODE_SPACE, 0); dm_key_modifier(DM_KEY_SHIFT, 0);
+    keyboard_fill(k, 1, 222); keyboard_fill(k, 1, 223);
+    dm_key_press(DM_KEYCODE_SPACE, 1); dm_key_press(DM_KEYCODE_SPACE, 0);
+    check("a short Space press between two reads is still seen once", keyboard_fill(k, 2, 230) == 2 && KEY(0, 44) && !KEY(1, 44) && !KEY(0, 41));
+    check("then released", keyboard_fill(k, 2, 231) == 2 && !KEY(0, 44) && KEY(1, 44));
+    check("..and nothing is left in any entry", keyboard_fill(k, 2, 232) == 2 && !*(uint64_t *)(k + 0x10) && !*(uint64_t *)(k + 0x30 + 0x10));
+    dm_key_press(300, 1);
+    check("a usage beyond the 256-bit set is ignored", keyboard_fill(k, 1, 233) == 1 && !*(uint64_t *)(k + 0x10) && !*(uint64_t *)(k + 0x18) && !*(uint64_t *)(k + 0x20) && !*(uint64_t *)(k + 0x28));
+    #undef KEY
     frame_t f, g;
     dm_mouse_button(DM_MOUSE_LEFT, 1); dm_mouse_button(DM_MOUSE_LEFT, 0); dm_mouse_wheel(4);
     dm_mouse_frame(1000, &f);

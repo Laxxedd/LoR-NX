@@ -1,6 +1,8 @@
 name: Build IPA
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       app_name:
@@ -280,15 +282,16 @@ jobs:
 
       - name: Build IPA
         env:
-          APP_NAME: ${{ inputs.app_name }}
+          APP_NAME: ${{ inputs.app_name || 'Library of Ruina' }}
           EXTRA_ARGS: ${{ inputs.extra_args }}
-          ROMFS_MODE: ${{ inputs.romfs_mode }}
-          SHADER_MODE: ${{ inputs.shader_mode }}
+          ROMFS_MODE: ${{ inputs.romfs_mode || 'headless' }}
+          SHADER_MODE: ${{ inputs.shader_mode || 'headless' }}
         run: |
           set -eo pipefail
           GAME_DIR="$HOME/game"
           WORK_DIR="$HOME/work"
           mkdir -p "$WORK_DIR"
+          ROMFS_MODE=${ROMFS_MODE:-headless}
           if [ "$ROMFS_MODE" = headless ]; then ROMFS_MODE=separate; fi
           args=("$GAME_DIR" -k "$RUNNER_TEMP/prod.keys" -o "$GAME_DIR/nxnative.ipa" --work-dir "$WORK_DIR" --keep-extracted --romfs "$ROMFS_MODE" --progress lines)
           if [ -n "$APP_NAME" ]; then args+=(--app-name "$APP_NAME"); fi
@@ -311,7 +314,7 @@ jobs:
           key: nxshader-v1-${{ steps.links.outputs.hash }}-${{ hashFiles('dm/gfx/**', 'dm/games/**', 'scripts/build_ipa_from_nsp.py') }}
 
       - name: Show RomFS image identity
-        if: ${{ success() && inputs.romfs_mode == 'headless' }}
+        if: ${{ success() && ((inputs.romfs_mode || 'headless') == 'headless') }}
         run: |
           set -eo pipefail
           for img in "$HOME"/work/extract/*/RomFS.img; do
@@ -323,7 +326,7 @@ jobs:
         env:
           ENCRYPT: ${{ inputs.encrypt }}
           PASS: ${{ secrets.IPA_PASSPHRASE }}
-          SHADER_MODE: ${{ inputs.shader_mode }}
+          SHADER_MODE: ${{ inputs.shader_mode || 'headless' }}
         run: |
           set -eo pipefail
           mkdir -p "$HOME/out"
@@ -360,7 +363,7 @@ jobs:
       # The shader libraries a headless build leaves out of the IPA (dm/tools/msl_id.py staged them: msl.id and the b-<chain> folder; the 7z, when encrypted, holds that folder as msl).
       # Unzip into a folder named msl and copy it to the app's Documents (Files app), or scripts/push_shaders.sh; the app uses it only when its msl.id is the one the IPA was built with
       - name: Shader libraries for Documents/msl
-        if: ${{ success() && inputs.shader_mode == 'headless' }}
+        if: ${{ success() && (inputs.shader_mode || 'headless') == 'headless' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nxnative-shaders

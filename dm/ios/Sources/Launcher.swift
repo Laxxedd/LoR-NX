@@ -98,14 +98,18 @@ private struct LauncherView: View {
     private let increasedLimit = dm_has_increased_memory_entitlement()   // fixed for the life of the process
     private let donorEmbedded = dm_ram_donor_embedded()
     private static let memorySection = "Memory"
-    @State private var editingSwipeLayout = false
+    private enum LayoutEditor: String, Identifiable {   // the layout editor on screen: the swipe gamepad's or Touchscreen Mode's keys
+        case swipe, touchscreen
+        var id: String { rawValue }
+    }
+    @State private var layoutEditor: LayoutEditor?
     @State private var modPage: [String] = []   // the pages pushed on the list: the mods page (modsPage) and a mod's settings page (its env): the navigation stack's path
     private static let modsPage = "mods"   // not a DM_ name, so never a mod's env
 
-    // Opens the layout editor of the Swipe touch layout (GestureLayoutEditor.swift). It is the only touch layout.
+    // Opens the layout editor of the Swipe touch layout (GestureLayoutEditor.swift).
     // Touchscreen Mode hides the swipe gamepad, so the button stays but is greyed out
     private var swipeEditorButton: some View {
-        Button { editingSwipeLayout = true } label: {
+        Button { layoutEditor = .swipe } label: {
             HStack {
                 Label("Edit swipe controls layout", systemImage: "formfitting.gamecontroller")
                 Spacer()
@@ -113,6 +117,23 @@ private struct LauncherView: View {
             }
         }
         .disabled(m.values["DM_TOUCHSCREEN"] == "1")
+    }
+
+    // Opens the layout editor of Touchscreen Mode's keys (TouchscreenLayoutEditor.swift). The keys exist only in that mode, so the button is greyed out while it is off
+    private var touchscreenEditorButton: some View {
+        Button { layoutEditor = .touchscreen } label: {
+            HStack {
+                Label("Edit touchscreen layout", systemImage: "keyboard")
+                Spacer()
+                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+            }
+        }
+        .disabled(m.values["DM_TOUCHSCREEN"] != "1")
+    }
+
+    @ViewBuilder private var layoutEditorButtons: some View {
+        swipeEditorButton
+        touchscreenEditorButton
     }
 
     // The Mods section is one button: the mods themselves, grouped by category, are on the page it opens (ModsBrowserPage)
@@ -192,13 +213,13 @@ private struct LauncherView: View {
                                 if !rows.isEmpty {
                                     Section(section) {
                                         ForEach(rows) { s in SettingRow(s: s, m: m) }
-                                        if section == "Controls" { swipeEditorButton }
+                                        if section == "Controls" { layoutEditorButtons }
                                     }
                                 }
                             }
                         }
                         if m.rows(in: "Controls").isEmpty {   // a game with no controls settings still gets the editor
-                            Section("Controls") { swipeEditorButton }
+                            Section("Controls") { layoutEditorButtons }
                         }
                         Section {
                             Button("Reset to tested defaults") { m.reset() }
@@ -220,7 +241,12 @@ private struct LauncherView: View {
                 .frame(width: geometry.size.width * 2 / 3)
             }
         }
-        .fullScreenCover(isPresented: $editingSwipeLayout) { GestureLayoutEditorView(dedicatedB: m.values["DM_DEDICATED_B"] == "1") }
+        .fullScreenCover(item: $layoutEditor) { editor in
+            switch editor {
+            case .swipe: GestureLayoutEditorView(dedicatedB: m.values["DM_DEDICATED_B"] == "1")
+            case .touchscreen: TouchscreenLayoutEditorView()
+            }
+        }
         .preferredColorScheme(.dark)
         .task {
             while !Task.isCancelled {

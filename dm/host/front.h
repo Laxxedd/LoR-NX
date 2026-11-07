@@ -40,17 +40,19 @@ typedef struct { uint32_t id; float x, y; } dm_touch;
 void dm_touch_set(const dm_touch *t, int n);
 void dm_touch_script(const dm_touch *t, int n);   // scripted touches (DM_KEYS, DM_CTL; hle_hid.c): as dm_touch_set, but never recorded by DM_REC
 
-// Touchscreen Mode's virtual mouse and keyboard modifiers (implemented by the host's hle_touch.c; called by the iOS front end's touchpad and keyboard keys, from the main thread).
+// Touchscreen Mode's virtual mouse and keyboard keys (implemented by the host's hle_touch.c; called by the iOS front end's touchpad and keyboard keys, from the main thread).
 // With DM_TOUCHSCREEN=1 the game's nn::hid mouse and keyboard read these as a connected mouse and keyboard (hle_hid.c); otherwise they stay "not connected".
 // The cursor lives in the panel's 1280x720 coordinates, starts at the centre and is clamped to the panel; presses are latched (a press and release between two reads is still reported once).
 // A plain mouse: the cursor, both buttons and the wheel are what the game's GetMouseState(s) reads. DM_TRACKPAD_TOUCH=1 also reports the left button as a touch-screen press at the cursor (finger 0), the fallback for a
 // game that reads the touch screen and not the mouse.
 enum { DM_MOUSE_LEFT = 1, DM_MOUSE_RIGHT = 2 };
 enum { DM_KEY_CTRL = 1, DM_KEY_SHIFT = 2, DM_KEY_ALT = 4 };
+enum { DM_KEYCODE_ESCAPE = 41, DM_KEYCODE_SPACE = 44 };   // USB usages of the keys dm_key_press takes (the bit numbers of the key set in nn::hid's KeyboardState)
 void dm_mouse_move(float dx, float dy);              // moves the cursor by dx, dy panel pixels
 void dm_mouse_button(uint32_t mask, int down);       // presses or releases the DM_MOUSE_* buttons in mask
 void dm_mouse_wheel(int notches);                    // wheel notches, positive = wheel up (content scrolls toward its top)
 void dm_key_modifier(uint32_t mask, int down);       // presses or releases the DM_KEY_* modifier keys in mask
+void dm_key_press(uint32_t usage, int down);         // presses or releases one other key by its USB usage (DM_KEYCODE_*, 0..255); a press and release between two reads is still reported once
 
 // Save not written (called by the host's hle_fs.c; the iOS front end provides a strong implementation of the same name that shows the native prompt "Not enough storage. Progress was not saved"; the default weak implementation only logs).
 // Timing: when a save write fails (disk full etc.) within one of the game's save transactions (between two Commits), so that this Commit is refused and the previously committed save is unchanged, it is called once per refused transaction;
