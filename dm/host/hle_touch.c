@@ -220,6 +220,11 @@ void dm_mouse_set(float x, float y) {   // Touch pointer mode: the cursor is whe
     g_mdx += nx - g_mx; g_mdy += ny - g_my; g_mx = nx; g_my = ny;
     pthread_mutex_unlock(&g_ml);
 }
+void dm_mouse_park(void) {   // Touch pointer mode: no finger down, so the cursor is off the panel (-1, -1): nothing is under it, and a finger landing on the spot it was last at cannot find a menu already hovered
+    pthread_mutex_lock(&g_ml);
+    g_mdx += -1 - g_mx; g_mdy += -1 - g_my; g_mx = -1; g_my = -1;
+    pthread_mutex_unlock(&g_ml);
+}
 void dm_mouse_button(uint32_t mask, int down) {
     pthread_mutex_lock(&g_ml);
     if (down) { g_mheld |= mask; g_mlatch |= mask; g_mflatch |= mask; } else g_mheld &= ~mask;

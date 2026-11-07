@@ -9,6 +9,7 @@ enum { DM_KEY_CTRL = 1, DM_KEY_SHIFT = 2, DM_KEY_ALT = 4 };
 enum { DM_KEYCODE_ESCAPE = 41, DM_KEYCODE_SPACE = 44 };
 void dm_mouse_move(float dx, float dy);
 void dm_mouse_set(float x, float y);
+void dm_mouse_park(void);
 void dm_mouse_button(uint32_t mask, int down);
 void dm_mouse_wheel(int notches);
 void dm_key_modifier(uint32_t mask, int down);
@@ -186,6 +187,10 @@ int main(int argc, char **argv) {
         check("and it stays there with no movement", mouse_fill(a, 1, 3002) == 1 && a[0].x == 200 && a[0].y == 100 && a[0].dx == 0 && a[0].dy == 0);
         dm_mouse_set(-50.0f, 9999.0f);
         check("dm_mouse_set clamps to the panel", mouse_fill(a, 1, 3003) == 1 && a[0].x == 0 && a[0].y == 719);
+        dm_mouse_park();
+        check("dm_mouse_park puts the cursor off the panel at (-1, -1)", mouse_fill(a, 1, 3004) == 1 && a[0].x == -1 && a[0].y == -1);
+        dm_mouse_set(300.0f, 200.0f);
+        check("and dm_mouse_set brings it back", mouse_fill(a, 1, 3005) == 1 && a[0].x == 300 && a[0].y == 200);
     }
     key_frame_cases();
     printf("%d / %d passed\n", cases - fails, cases);

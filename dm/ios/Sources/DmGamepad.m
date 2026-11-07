@@ -148,10 +148,11 @@ static const CGFloat
     K_TP_GAIN = 1.5,                                // cursor speed: panel pixels per screen pixel of the picture, times this (and times the launcher's Cursor sensitivity)
     K_TP_SLOP = 9,                                  // a finger that stays within this many points of where it landed has not moved (a tap, or a hold)
     K_TP_STEP = 26,                                 // two fingers travelling this many points up or down scroll the wheel one notch
-    K_KB_GAP = 8, K_KB_R = 8,                       // the keys' hit areas reach half this far beyond them; the corner radius of the squircle keys
+    K_KB_GAP = 8, K_KB_R = 6,                       // the keys' hit areas reach half this far beyond them; the corner radius of the squircle keys
     K_KB_HIT = 44;                                  // a key is at least this big to hit, however small it is drawn (the thin Space key is 4 points tall)
 static const NSTimeInterval K_TP_HOLD = 0.45;       // a finger held still this long is the right button (Touch pointer mode: the left button, held)
 static const NSTimeInterval K_PT_DOUBLE = 0.30;     // Touch pointer mode: a tap this soon after a tap (and close to it) is a double tap: its lift adds a right click to the left click the first tap already made
+static const NSTimeInterval K_PT_PARK = 0.2;        // Touch pointer mode: this long after the last finger lifts (the click is read by then) the cursor leaves the panel
 static const CGFloat K_PT_DOUBLE_DIST = 36;         // ... and this close (points) to the first
 // The touchscreen keys, in the order of TouchscreenLayout.swift's TouchKey (position, size and opacity come from there: dm_ts_key_frame / dm_ts_key_opacity)
 enum { TS_SHIFT, TS_CTRL, TS_ALT, TS_ESC, TS_SPACE, TS_N };
@@ -201,7 +202,7 @@ static void pads_start(void);   // Physical controllers, below
     NSMutableArray<UITouch *> *_pad;               // the fingers on the touchpad in the order they landed (the first two count)
     CGPoint _padStart, _padLast; BOOL _padMoved, _padDead, _padRight;   // one finger: where it landed / was last applied, moved past the slop, the gesture is over (two fingers were down: nothing more until all lift), the right button is held
     CGFloat _padScroll, _padScrollY;               // two fingers: vertical travel not yet turned into a notch, their mid point's last y
-    BOOL _ptHold, _ptSecond, _ptPending; CGPoint _ptPendingAt; CFTimeInterval _ptTapTime; NSUInteger _rmbEpoch;   // Touch pointer mode: the left button is held by a hold, the finger down is a double tap's second tap, a tap just made (where, when) that a second tap may follow, counts right clicks like _lmbEpoch
+    BOOL _ptHold, _ptSecond, _ptPending; CGPoint _ptPendingAt; CFTimeInterval _ptTapTime; NSUInteger _rmbEpoch, _ptParkEpoch;   // Touch pointer mode: the left button is held by a hold, the finger down is a double tap's second tap, a tap just made (where, when) that a second tap may follow, counts right clicks like _lmbEpoch
     NSTimer *_padTimer; NSUInteger _lmbEpoch;      // the hold timer; counts left clicks so an old release cannot let go of a newer press
     UIImpactFeedbackGenerator *_clickFeedback, *_rightFeedback; UISelectionFeedbackGenerator *_scrollFeedback;
 }
@@ -243,6 +244,7 @@ static BOOL fullOnly(int b) { return b == B_LS || b == B_RS || b >= B_LEFT; }   
             if (touchscreen_mode()) { [_clickFeedback prepare]; [_rightFeedback prepare]; [_scrollFeedback prepare]; }
         }
         _pad = [NSMutableArray array];
+        if (pointer_touch()) dm_mouse_park();   // no finger yet: nothing hovered at the panel's centre
         _owner = [NSMapTable strongToStrongObjectsMapTable]; _faceOf = [NSMapTable strongToStrongObjectsMapTable];
         static dispatch_once_t once;
         dispatch_once(&once, ^{
@@ -251,7 +253,7 @@ static BOOL fullOnly(int b) { return b == B_LS || b == B_RS || b >= B_LEFT; }   
             k_ringFill = [UIColor colorWithWhite:1 alpha:0.06]; k_text = [UIColor colorWithWhite:1 alpha:0.6]; k_textOn = [UIColor colorWithWhite:0 alpha:0.7];
             k_kbIdle = [UIColor colorWithWhite:1 alpha:0.04]; k_kbOn = [UIColor colorWithWhite:1 alpha:0.30];
             k_kbLine = [UIColor colorWithWhite:1 alpha:0.42]; k_kbLineOn = [UIColor colorWithWhite:1 alpha:0.95];
-            k_kbText = [UIColor colorWithWhite:1 alpha:0.85]; k_kbTextOn = [UIColor colorWithWhite:1 alpha:1];
+            k_kbText = [UIColor colorWithWhite:1 alpha:0.55]; k_kbTextOn = [UIColor colorWithWhite:1 alpha:0.9];
         });
         _controls = [CALayer layer]; [self.layer addSublayer:_controls];
         _ring = shape(_controls); _ring.fillColor = k_ringFill.CGColor;
@@ -508,6 +510,10 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
     return CGPointMake(MIN(MAX(x, 0), 1279), MIN(MAX(y, 0), 719));
 }
 - (void)ptPlaceCursor:(CGPoint)p { CGPoint q = [self panelPoint:p]; dm_mouse_set((float)q.x, (float)q.y); }
+- (void)ptParkSoon {   // Touch pointer mode: once the finger is up and the click has been read, the cursor leaves the panel, so the spot it was left on does not stay hovered (a new touch cancels it)
+    NSUInteger epoch = ++_ptParkEpoch;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, K_PT_PARK * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ if (epoch == self->_ptParkEpoch && self->_pad.count == 0) dm_mouse_park(); });
+}
 - (void)padRightClick {
     dm_mouse_button(DM_MOUSE_RIGHT, 1);
     [_rightFeedback impactOccurred]; [_rightFeedback prepare];
@@ -532,7 +538,7 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
             if (pointer_touch()) {
                 _ptHold = _ptSecond = NO;
                 if (_ptPending && CACurrentMediaTime() - _ptTapTime <= K_PT_DOUBLE && hypot(_padStart.x - _ptPendingAt.x, _padStart.y - _ptPendingAt.y) <= K_PT_DOUBLE_DIST) _ptSecond = YES;   // the second tap of a double tap
-                _ptPending = NO;
+                _ptPending = NO; _ptParkEpoch++;
                 [self ptPlaceCursor:_padStart];
             }
             _padTimer = [NSTimer scheduledTimerWithTimeInterval:K_TP_HOLD target:self selector:@selector(padHold:) userInfo:nil repeats:NO];
@@ -576,7 +582,7 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
                     if (_ptSecond) [self padRightClick];   // the double tap: a right click on top of the left click its first tap made
                     else { [self padClick]; _ptPending = YES; _ptPendingAt = _padStart; _ptTapTime = CACurrentMediaTime(); }   // a tap: a left click at once
                 }
-                _ptSecond = NO;
+                _ptSecond = NO; [self ptParkSoon];
             }
             else if (_padRight) { dm_mouse_button(DM_MOUSE_RIGHT, 0); _padRight = NO; }
             else if (!_padMoved && !_padDead && !cancelled) [self padClick];
@@ -590,7 +596,7 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
     for (int k = 0; k < TS_N; k++) if (_kbTouch[k]) { _kbTouch[k] = nil; ts_key(k, 0); }
     if (_padRight) { _padRight = NO; dm_mouse_button(DM_MOUSE_RIGHT, 0); }
     if (touchscreen_mode()) { _lmbEpoch++; dm_mouse_button(DM_MOUSE_LEFT, 0); }
-    if (pointer_touch()) { _ptPending = _ptHold = _ptSecond = NO; _rmbEpoch++; dm_mouse_button(DM_MOUSE_RIGHT, 0); }
+    if (pointer_touch()) { _ptPending = _ptHold = _ptSecond = NO; _rmbEpoch++; dm_mouse_button(DM_MOUSE_RIGHT, 0); dm_mouse_park(); }
     [_pad removeAllObjects]; _padMoved = _padDead = NO;
     [self refreshKeys];
 }
@@ -626,14 +632,13 @@ static void placeLabel(CATextLayer *t, CGPoint c, CGFloat fs) {
     CFRelease(f);
 }
 
-static void placeKeyLabel(CATextLayer *t, CGPoint c, CGFloat fs) {   // medium weight, as the gamepad's outlined buttons (GesturePad.swift)
-    CTFontRef base = CTFontCreateUIFontForLanguage(kCTFontUIFontSystem, fs, NULL), f = base;
-    CTFontDescriptorRef d = CTFontDescriptorCreateWithAttributes((__bridge CFDictionaryRef)@{(id)kCTFontTraitsAttribute: @{(id)kCTFontWeightTrait: @(UIFontWeightMedium)}});
-    CTFontRef m = base && d ? CTFontCreateCopyWithAttributes(base, fs, NULL, d) : NULL; if (m) f = m;
+static CGFloat kbLabelSize(CGFloat keyHeight) { return MAX(9, MIN(keyHeight * 0.34, 15)); }   // small: the keys are low (TouchscreenLayout.swift), the same in the layout editor
+static void placeKeyLabel(CATextLayer *t, CGPoint c, CGFloat fs) {   // Menlo, light on the key (the editor's keys use the same font and size: TouchscreenLayoutEditor.swift)
+    CTFontRef f = CTFontCreateWithName(CFSTR("Menlo-Regular"), fs, NULL);
     t.font = f; t.fontSize = fs;
-    CGFloat h = f ? CTFontGetAscent(f) + CTFontGetDescent(f) + CTFontGetLeading(f) : fs * 1.2, w = fs * 4;
+    CGFloat h = f ? CTFontGetAscent(f) + CTFontGetDescent(f) + CTFontGetLeading(f) : fs * 1.2, w = fs * 6;
     t.frame = CGRectMake(c.x - w / 2, c.y - h / 2, w, h);
-    if (m) CFRelease(m); if (d) CFRelease(d); if (base) CFRelease(base);
+    if (f) CFRelease(f);
 }
 
 - (void)layoutSubviews {
@@ -646,7 +651,7 @@ static void placeKeyLabel(CATextLayer *t, CGPoint c, CGFloat fs) {   // medium w
     for (int i = 0; i < TS_N; i++) {   // the squircle keys; Space is a thin bar with round ends
         CGRect rc = _kbFrame[i] = dm_ts_key_frame(i, self.bounds.size, u); CGFloat r = i == TS_SPACE ? rc.size.height / 2 : K_KB_R * u;
         setPath(_kbKey[i], CGPathCreateWithRoundedRect(rc, r, r, NULL)); _kbKey[i].opacity = (float)dm_ts_key_opacity(i);
-        if (i != TS_SPACE) placeKeyLabel(_kbLabel[i], CGPointMake(CGRectGetMidX(rc), CGRectGetMidY(rc)), MAX(11, MIN(rc.size.height * 0.4, 24)));
+        if (i != TS_SPACE) placeKeyLabel(_kbLabel[i], CGPointMake(CGRectGetMidX(rc), CGRectGetMidY(rc)), kbLabelSize(rc.size.height));
     }
     for (int b = B_A; b <= B_Y; b++) { CGPoint c = [self facePos:b]; setPath(_key[b], circlePath(c, self.faceR)); placeLabel(_label[b], c, 20 * u); }
     for (int i = 0; i < (int)(sizeof k_btns / sizeof *k_btns); i++) { int b = k_btns[i];

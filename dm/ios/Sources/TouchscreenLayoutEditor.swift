@@ -200,7 +200,7 @@ final class TouchscreenLayoutUIView: UIView {
             layer.masksToBounds = true
 
             label.text = key.label
-            label.textColor = UIColor.white.withAlphaComponent(0.85)
+            label.textColor = UIColor.white.withAlphaComponent(0.55)
             label.textAlignment = .center
             label.isHidden = key.label == nil
             addSubview(label)
@@ -213,9 +213,9 @@ final class TouchscreenLayoutUIView: UIView {
 
         override func layoutSubviews() {
             super.layoutSubviews()
-            layer.cornerRadius = key.isBar ? bounds.height / 2 : 8 * unit
+            layer.cornerRadius = key.isBar ? bounds.height / 2 : 6 * unit
             label.frame = bounds
-            label.font = .systemFont(ofSize: max(11, min(bounds.height * 0.4, 24)), weight: .medium)
+            label.font = UIFont(name: "Menlo-Regular", size: max(9, min(bounds.height * 0.34, 15))) ?? .monospacedSystemFont(ofSize: max(9, min(bounds.height * 0.34, 15)), weight: .regular)   // as DmGamepad.m's keys
         }
     }
 
@@ -381,7 +381,7 @@ final class TouchscreenLayoutUIView: UIView {
 
         let frame = TouchKey.hitRect(of: view.frame).insetBy(dx: -5, dy: -5)
         selectionRing.frame = frame
-        selectionRing.layer.cornerRadius = key.isBar ? frame.height / 2 : min(8 * unit + 5, frame.height / 2)
+        selectionRing.layer.cornerRadius = key.isBar ? frame.height / 2 : min(6 * unit + 5, frame.height / 2)
         selectionRing.isHidden = false
     }
 

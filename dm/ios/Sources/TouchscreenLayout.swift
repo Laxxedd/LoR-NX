@@ -43,10 +43,10 @@ enum TouchKey: String, CaseIterable, Codable {
     static let minimumHitSize: CGFloat = 44
 
     /// The key's size in points. `unit` is DmGamepad.m's u (1 = 430 points of screen height, at most 1.3), `scale` the player's size choice.
-    /// A squircle key is 62 x 50 units; Space is 300 units wide and `barThickness` thick, and its size choice changes only its length.
+    /// A squircle key is 62 x 30 units; Space is 300 units wide and `barThickness` thick, and its size choice changes only its length.
     func size(unit: CGFloat, scale: CGFloat) -> CGSize {
         if isBar { return CGSize(width: 300 * unit * scale, height: Self.barThickness) }
-        return CGSize(width: 62 * unit * scale, height: 50 * unit * scale)
+        return CGSize(width: 62 * unit * scale, height: 30 * unit * scale)
     }
 
     /// The area that takes a touch for the key: its frame, grown to the minimum hit size.
