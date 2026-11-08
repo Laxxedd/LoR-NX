@@ -9,6 +9,7 @@ void dm_mod_gate_run(uint64_t *regs, int param, void (*fn)(uint64_t *, int));
 #define K_OBJECT_GET_NAME 0x19B4080u
 #define K_GO_GET_TRANSFORM 0x19AFBA0u
 #define K_TRANSFORM_GET_PARENT 0x19BC440u
+#define K_COMPONENT_GET_TRANSFORM 0x19AE1D0u
 
 #define F_LU_CARD_GROUP 0x40u
 #define F_LU_EGO_SLOTS 0xA0u
@@ -17,6 +18,7 @@ void dm_mod_gate_run(uint64_t *regs, int param, void (*fn)(uint64_t *, int));
 #define F_SLOT_SELECTABLE 0x80u
 #define F_ARRAY_LENGTH 0x18u
 #define F_ARRAY_DATA 0x20u
+#define F_EVENT_POINTER_PRESS 0x28u
 #define F_EVENT_ELIGIBLE 0xF8u
 #define F_EVENT_POSITION 0x100u
 #define F_EVENT_PRESS_POSITION 0x110u
@@ -76,27 +78,49 @@ static void pick_run(uint64_t *r, int p) {
     FN(K_ON_SELECT_EGO_CARD, void, void *, void *, void *)(s_pick_ui, s_pick_slot, NULL);
 }
 
+static void *tf_of_component(void *c);
+static void chain_of_tf(void *t, char *out, size_t cap);
+
 static void raycast_run(uint64_t *r, int p) {
     (void)r; (void)p;
     void *group = ptr_at(s_raycast_ui, F_LU_CARD_GROUP);
     if (group) FN(K_SET_BLOCKS_RAYCASTS, void, void *, int, void *)(group, 1, NULL);
+    static int dumped;
+    if (dumped++ < 2) {   // where each slot and its selectable sit, to compare with the chain of the object the finger hits
+        void *slots = ptr_at(s_raycast_ui, F_LU_EGO_SLOTS);
+        int n = int_at(slots, F_ARRAY_LENGTH);
+        for (int i = 0; i < n && i < 8; i++) {
+            void *slot = ptr_at(slots, F_ARRAY_DATA + 8u * (uintptr_t)i);
+            char a[320], b[320];
+            chain_of_tf(tf_of_component(slot), a, sizeof a);
+            chain_of_tf(tf_of_component(ptr_at(slot, F_SLOT_SELECTABLE)), b, sizeof b);
+            LOG("[mod ego-page-select]   slot %d at [%s]; selectable at [%s]", i, a, b);
+        }
+    }
 }
 
 // Not "the pointer is still over the slot": PointerEventData.pointerEnter is the deepest object the raycast hit (the card's artwork, name or icon, all children of
 // the slot), never the selectable's own GameObject, so comparing the two failed whenever the finger landed on a child graphic. UGUI delivers OnPointerUp to the
 // object that took the press whatever is under the finger afterwards, so a release at (nearly) the press position is the tap.
 static int is_tap(void *event) {
-    if (!event || byte_at(event, F_EVENT_BUTTON) != 0 || !byte_at(event, F_EVENT_ELIGIBLE)) return 0;
+    if (!event || byte_at(event, F_EVENT_BUTTON) != 0) return 0;
     const float *pos = (const float *)((uintptr_t)event + F_EVENT_POSITION);
     const float *press = (const float *)((uintptr_t)event + F_EVENT_PRESS_POSITION);
     float dx = pos[0] - press[0], dy = pos[1] - press[1];
     return dx * dx + dy * dy <= TAP_SLOP_PX * TAP_SLOP_PX;
 }
 
-// Diagnostics: the names of the object under the finger and of its parents, as the input module saw them at a release (LOR_InputModule.ReleaseMouse(pointerEvent, currentOverGo)).
-static void *s_diag_over;
-static void *s_diag_press;
-static void *s_diag_event;
+// Why the original approach never saw a press: UGUI hands a press to the first IPointerDownHandler / IPointerClickHandler on the object under the finger or one of its
+// parents (ExecuteEvents.ExecuteHierarchy). The log shows the finger is over "LeftArea_Root < VibeRect < Prefab_LevelUPEgoCard (n) < EgoCardLayout", and
+// ReleaseMouse sees pointerPress == null every time, so nothing on that path takes the press: the EGO slot's UICustomSelectable (BattleDiceCardUI_EgoSelection.selectable) is
+// not an ancestor of the graphic that gets hit (OnPointerDown on it never runs), and the slot itself is a plain MonoBehaviour. The abnormality cards avoid this because
+// EmotionPassiveCardUI implements IPointerDownHandler / IPointerUpHandler on its own root.
+//
+// So the tap is recognised at ReleaseMouse instead, from what the input module already knows: the object under the pointer (x2) and the PointerEventData (x1).
+// The slot is found by hierarchy, not by a component on the hit object: the slot whose transform shares the deepest ancestor with the hit object, if exactly one does
+// (the hit graphic lives in one card's subtree, so it shares that card's root with that card's slot and only the common layout with the others).
+static void *s_rel_event;
+static void *s_rel_over;
 
 static void il2cpp_ascii(void *str, char *out, size_t cap) {
     size_t n = 0;
@@ -108,12 +132,14 @@ static void il2cpp_ascii(void *str, char *out, size_t cap) {
     out[n] = 0;
 }
 
-static void chain_of(void *go, char *out, size_t cap) {
+static void *tf_of_go(void *go) { return go ? FN(K_GO_GET_TRANSFORM, void *, void *, void *)(go, NULL) : NULL; }
+static void *tf_of_component(void *c) { return c ? FN(K_COMPONENT_GET_TRANSFORM, void *, void *, void *)(c, NULL) : NULL; }
+
+static void chain_of_tf(void *t, char *out, size_t cap) {
     out[0] = 0;
-    if (!go) { snprintf(out, cap, "(none)"); return; }
-    void *t = FN(K_GO_GET_TRANSFORM, void *, void *, void *)(go, NULL);
+    if (!t) { snprintf(out, cap, "(none)"); return; }
     size_t used = 0;
-    for (int depth = 0; t && depth < 6 && used + 40 < cap; depth++) {
+    for (int depth = 0; t && depth < 8 && used + 40 < cap; depth++) {
         char name[48];
         il2cpp_ascii(FN(K_OBJECT_GET_NAME, void *, void *, void *)(t, NULL), name, sizeof name);
         used += (size_t)snprintf(out + used, cap - used, "%s%s", depth ? " < " : "", name);
@@ -121,14 +147,77 @@ static void chain_of(void *go, char *out, size_t cap) {
     }
 }
 
-static void diag_run(uint64_t *r, int p) {
+#define MAX_DEPTH 64
+
+// The transform and its parents, nearest first; -1 when the hierarchy is deeper than MAX_DEPTH (the root alignment below would be wrong).
+static int up_chain(void *t, void **out) {
+    int n = 0;
+    while (t) {
+        if (n == MAX_DEPTH) return -1;
+        out[n++] = t;
+        t = FN(K_TRANSFORM_GET_PARENT, void *, void *, void *)(t, NULL);
+    }
+    return n;
+}
+
+// How many ancestors, counted from the scene root, the two chains share.
+static int shared_depth(void **a, int na, void **b, int nb) {
+    int i = na - 1, j = nb - 1, shared = 0;
+    while (i >= 0 && j >= 0 && a[i] == b[j]) { shared++; i--; j--; }
+    return shared;
+}
+
+// The EGO slot whose card the hit object belongs to, or NULL (hit outside every card, or ambiguous). Runs guest code: only from a dm_mod_gate_run callback.
+static void *slot_under(void *over_go) {
+    void *slots = ptr_at(s_levelup, F_LU_EGO_SLOTS);
+    int n = int_at(slots, F_ARRAY_LENGTH);
+    if (!over_go || n < 2 || n > 8) return NULL;
+    void *over_chain[MAX_DEPTH], *slot_chain[MAX_DEPTH];
+    int over_n = up_chain(tf_of_go(over_go), over_chain);
+    if (over_n <= 0) return NULL;
+    void *best = NULL;
+    int best_shared = -1, tie = 0;
+    for (int i = 0; i < n; i++) {
+        void *slot = ptr_at(slots, F_ARRAY_DATA + 8u * (uintptr_t)i);
+        int slot_n = up_chain(tf_of_component(slot), slot_chain);
+        if (slot_n <= 0) continue;
+        int shared = shared_depth(over_chain, over_n, slot_chain, slot_n);
+        if (shared > best_shared) { best_shared = shared; best = slot; tie = 0; }
+        else if (shared == best_shared) tie = 1;
+    }
+    return tie ? NULL : best;
+}
+
+// Runs on the guest stack (dm_mod_gate_run) at LOR_InputModule.ReleaseMouse entry while the EGO selection is open.
+static void release_run(uint64_t *r, int p) {
     (void)r; (void)p;
-    static int n;
-    if (n++ >= 60) return;
-    char over[320], press[320];
-    chain_of(s_diag_over, over, sizeof over);
-    chain_of(s_diag_press, press, sizeof press);
-    LOG("[mod ego-page-select] release: over %p [%s]; pressed %p [%s]", s_diag_over, over, s_diag_press, press);
+    static int n_diag, n_reject, n_nohit, n_pick;
+    void *event = s_rel_event, *over = s_rel_over;
+    void *press = ptr_at(event, F_EVENT_POINTER_PRESS);
+    if (n_diag++ < 40) {
+        char chain[320];
+        chain_of_tf(tf_of_go(over), chain, sizeof chain);
+        LOG("[mod ego-page-select] release: over %p [%s]; pointerPress %p", over, chain, press);
+    }
+    // The game found a press target (a selectable of its own, a card that handles the press): its hooks above and its own handlers deal with the release.
+    if (press) return;
+    if (!ego_open(s_levelup)) return;
+    if (!is_tap(event)) {
+        if (n_reject++ < 20) {
+            const float *pos = (const float *)((uintptr_t)event + F_EVENT_POSITION);
+            const float *pp = (const float *)((uintptr_t)event + F_EVENT_PRESS_POSITION);
+            LOG("[mod ego-page-select] release with no press target is not a tap (button %d, eligible %d, at (%.0f,%.0f), pressed at (%.0f,%.0f))",
+                byte_at(event, F_EVENT_BUTTON), byte_at(event, F_EVENT_ELIGIBLE), pos[0], pos[1], pp[0], pp[1]);
+        }
+        return;
+    }
+    void *slot = slot_under(over);
+    if (!slot) {
+        if (n_nohit++ < 20) LOG("[mod ego-page-select] tap over %p belongs to no single EGO card", over);
+        return;
+    }
+    if (n_pick++ < 20) LOG("[mod ego-page-select] EGO page %p picked from a tap (found by hierarchy)", slot);
+    FN(K_ON_SELECT_EGO_CARD, void, void *, void *, void *)(s_levelup, slot, NULL);
 }
 
 static void on_ego_ui(uint64_t *r, int p) {
@@ -139,10 +228,9 @@ static void on_ego_ui(uint64_t *r, int p) {
     switch (p) {
     case 6:
         if (ego_open(s_levelup)) {
-            s_diag_event = self;
-            s_diag_over = (void *)(uintptr_t)r[2];
-            s_diag_press = ptr_at(self, 0x28u);
-            dm_mod_gate_run(r, p, diag_run);
+            s_rel_event = event;
+            s_rel_over = (void *)(uintptr_t)r[2];
+            dm_mod_gate_run(r, p, release_run);
         }
         break;
     case 1:
