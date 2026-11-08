@@ -6,6 +6,9 @@ void dm_mod_gate_run(uint64_t *regs, int param, void (*fn)(uint64_t *, int));
 
 #define K_ON_SELECT_EGO_CARD 0x1E1E9A0u
 #define K_SET_BLOCKS_RAYCASTS 0x34FAF30u
+#define K_OBJECT_GET_NAME 0x19B4080u
+#define K_GO_GET_TRANSFORM 0x19AFBA0u
+#define K_TRANSFORM_GET_PARENT 0x19BC440u
 
 #define F_LU_CARD_GROUP 0x40u
 #define F_LU_EGO_SLOTS 0xA0u
@@ -90,12 +93,58 @@ static int is_tap(void *event) {
     return dx * dx + dy * dy <= TAP_SLOP_PX * TAP_SLOP_PX;
 }
 
+// Diagnostics: the names of the object under the finger and of its parents, as the input module saw them at a release (LOR_InputModule.ReleaseMouse(pointerEvent, currentOverGo)).
+static void *s_diag_over;
+static void *s_diag_press;
+static void *s_diag_event;
+
+static void il2cpp_ascii(void *str, char *out, size_t cap) {
+    size_t n = 0;
+    if (str) {
+        int len = *(const int *)((uintptr_t)str + 0x10);
+        const uint16_t *ch = (const uint16_t *)((uintptr_t)str + 0x14);
+        for (int i = 0; i < len && n + 1 < cap; i++) out[n++] = ch[i] < 128 ? (char)ch[i] : '?';
+    }
+    out[n] = 0;
+}
+
+static void chain_of(void *go, char *out, size_t cap) {
+    out[0] = 0;
+    if (!go) { snprintf(out, cap, "(none)"); return; }
+    void *t = FN(K_GO_GET_TRANSFORM, void *, void *, void *)(go, NULL);
+    size_t used = 0;
+    for (int depth = 0; t && depth < 6 && used + 40 < cap; depth++) {
+        char name[48];
+        il2cpp_ascii(FN(K_OBJECT_GET_NAME, void *, void *, void *)(t, NULL), name, sizeof name);
+        used += (size_t)snprintf(out + used, cap - used, "%s%s", depth ? " < " : "", name);
+        t = FN(K_TRANSFORM_GET_PARENT, void *, void *, void *)(t, NULL);
+    }
+}
+
+static void diag_run(uint64_t *r, int p) {
+    (void)r; (void)p;
+    static int n;
+    if (n++ >= 60) return;
+    char over[320], press[320];
+    chain_of(s_diag_over, over, sizeof over);
+    chain_of(s_diag_press, press, sizeof press);
+    LOG("[mod ego-page-select] release: over %p [%s]; pressed %p [%s]", s_diag_over, over, s_diag_press, press);
+}
+
 static void on_ego_ui(uint64_t *r, int p) {
     if (!mod_enabled() || !dm_touchscreen_mode() || !main_base()) return;
     void *self = (void *)(uintptr_t)r[0];
     void *event = (void *)(uintptr_t)r[1];
     static int logged_dump, logged_any, logged, logged_open, logged_raycast, logged_press, logged_reject;
     switch (p) {
+    case 6:
+        if (ego_open(s_levelup)) {
+            s_diag_event = self;
+            s_diag_over = (void *)(uintptr_t)r[2];
+            s_diag_press = ptr_at(self, 0x28u);
+            dm_mod_gate_run(r, p, diag_run);
+        }
+        break;
     case 1:
         s_levelup = self;
         s_pressed = NULL;

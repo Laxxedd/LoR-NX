@@ -49,6 +49,13 @@
         "offset": "0x1bd1570",
         "word": "a9bd7bfd",
         "reason": "UICustomSelectable.OnPointerUp entry: x0 = the selectable, x1 = the PointerEventData; a release over the pressed EGO page picks it with LevelUpUI.OnSelectEgoCard"
+      },
+      {
+        "gate": "ego_ui",
+        "param": 6,
+        "offset": "0x16ef8d0",
+        "word": "a9bb7bfd",
+        "reason": "LOR_InputModule.ReleaseMouse entry: x0 = the module, x1 = the PointerEventData, x2 = the object under the pointer; diagnostics log its name and parents while the EGO selection is open"
       }
     ]
   }
