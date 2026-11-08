@@ -1,5 +1,6 @@
 #include "dm.h"
 #include "hle_mods_gen.h"
+#include <time.h>
 
 int dm_touchscreen_mode(void);
 void dm_mod_gate_run(uint64_t *regs, int param, void (*fn)(uint64_t *, int));
@@ -10,6 +11,11 @@ void dm_mod_gate_run(uint64_t *regs, int param, void (*fn)(uint64_t *, int));
 #define K_GO_GET_TRANSFORM 0x19AFBA0u
 #define K_TRANSFORM_GET_PARENT 0x19BC440u
 #define K_COMPONENT_GET_TRANSFORM 0x19AE1D0u
+// UICustomSelectable.OnPointerEnter / OnPointerExit: what a mouse hovering the card's selectable runs. Its SelectEvent / DeselectEvent are the prefab's pad hooks for the slot
+// (BattleDiceCardUI_EgoSelection.OnPdCursorEnter / OnPdCursorExit): the card grows 1.25x, its Animator goes to the highlighted state, the hover sound plays and the page's
+// description opens on the right.
+#define K_SELECTABLE_POINTER_ENTER 0x1BD1310u
+#define K_SELECTABLE_POINTER_EXIT 0x1BD13F0u
 
 #define F_LU_CARD_GROUP 0x40u
 #define F_LU_EGO_SLOTS 0xA0u
@@ -19,6 +25,7 @@ void dm_mod_gate_run(uint64_t *regs, int param, void (*fn)(uint64_t *, int));
 #define F_ARRAY_LENGTH 0x18u
 #define F_ARRAY_DATA 0x20u
 #define F_EVENT_POINTER_PRESS 0x28u
+#define F_EVENT_CURRENT_RAYCAST_GO 0x50u   // pointerCurrentRaycast.m_GameObject
 #define F_EVENT_ELIGIBLE 0xF8u
 #define F_EVENT_POSITION 0x100u
 #define F_EVENT_PRESS_POSITION 0x110u
@@ -26,6 +33,9 @@ void dm_mod_gate_run(uint64_t *regs, int param, void (*fn)(uint64_t *, int));
 
 // A tap is a press and a release that stay within this many screen pixels (the touchpad mouse reports the same position for both).
 #define TAP_SLOP_PX 48.0f
+
+// A press held on a card for at least this long is "look at this page": the description stays open while the finger is down and the release does not pick the page.
+#define HOLD_MS 350u
 
 #define FN(rva, ret, ...) ((ret (*)(__VA_ARGS__))(main_base() + (rva)))
 
@@ -52,6 +62,9 @@ static void *s_pressed;
 static void *s_pick_ui;
 static void *s_pick_slot;
 static void *s_raycast_ui;
+static void *s_left_event;     // the left mouse button's PointerEventData: the input module reuses one object for it, so what ReleaseMouse sees of it is what every frame has
+static void *s_hover_slot;     // the slot whose hover the mod started (finger down on its card)
+static uint64_t s_hover_ms;    // when the finger went down on it
 
 static void *ptr_at(void *self, uintptr_t off) { return self ? *(void *const *)((uintptr_t)self + off) : NULL; }
 static int byte_at(void *self, uintptr_t off) { return self ? *(const uint8_t *)((uintptr_t)self + off) : 0; }
@@ -188,10 +201,42 @@ static void *slot_under(void *over_go) {
     return tie ? NULL : best;
 }
 
+static uint64_t now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
+}
+
+// The game's own hover on a card, as the cursor entering / leaving its selectable would run it (guest code: only from a dm_mod_gate_run callback).
+static void hover(void *slot, int enter) {
+    void *selectable = ptr_at(slot, F_SLOT_SELECTABLE);
+    if (!selectable) return;
+    FN(enter ? K_SELECTABLE_POINTER_ENTER : K_SELECTABLE_POINTER_EXIT, void, void *, void *, void *)(selectable, s_left_event, NULL);
+}
+
+static void set_hover(void *slot) {
+    static int n_log;
+    if (slot == s_hover_slot) return;
+    if (s_hover_slot) hover(s_hover_slot, 0);
+    s_hover_slot = slot;
+    if (slot) { hover(slot, 1); s_hover_ms = now_ms(); }
+    if (n_log++ < 30) LOG("[mod ego-page-select] hover %s", slot ? "on a card" : "off");
+}
+
+// Every frame while the EGO selection is open (LOR_InputModule.Process entry): a finger down on a card is the hover the game expects from a cursor, so the card opens its
+// description and highlights while it is held, and closes them when the finger leaves the card or lifts.
+static void tick_run(uint64_t *r, int p) {
+    (void)r; (void)p;
+    void *event = s_left_event;
+    if (!ego_open(s_levelup)) { s_hover_slot = NULL; return; }
+    int down = byte_at(event, F_EVENT_BUTTON) == 0 && byte_at(event, F_EVENT_ELIGIBLE);
+    set_hover(down ? slot_under(ptr_at(event, F_EVENT_CURRENT_RAYCAST_GO)) : NULL);
+}
+
 // Runs on the guest stack (dm_mod_gate_run) at LOR_InputModule.ReleaseMouse entry while the EGO selection is open.
 static void release_run(uint64_t *r, int p) {
     (void)r; (void)p;
-    static int n_diag, n_reject, n_nohit, n_pick;
+    static int n_diag, n_reject, n_nohit, n_pick, n_hold;
     void *event = s_rel_event, *over = s_rel_over;
     void *press = ptr_at(event, F_EVENT_POINTER_PRESS);
     if (n_diag++ < 40) {
@@ -216,6 +261,15 @@ static void release_run(uint64_t *r, int p) {
         if (n_nohit++ < 20) LOG("[mod ego-page-select] tap over %p belongs to no single EGO card", over);
         return;
     }
+    uint64_t held = (s_hover_slot == slot) ? now_ms() - s_hover_ms : 0;
+    if (held >= HOLD_MS) {
+        // Looked at, not picked: the next frame's tick sees the finger up and closes the description.
+        if (n_hold++ < 20) LOG("[mod ego-page-select] card %p held %llu ms: shown, not picked", slot, (unsigned long long)held);
+        return;
+    }
+    // A tap picks the page the way a cursor would: hovering it first (highlight state, description, sound) and then the submit.
+    set_hover(slot);
+    s_hover_slot = NULL;   // the card keeps the highlight the pick animation starts from; the selection closing resets the rest
     if (n_pick++ < 20) LOG("[mod ego-page-select] EGO page %p picked from a tap (found by hierarchy)", slot);
     FN(K_ON_SELECT_EGO_CARD, void, void *, void *, void *)(s_levelup, slot, NULL);
 }
@@ -227,20 +281,26 @@ static void on_ego_ui(uint64_t *r, int p) {
     static int logged_dump, logged_any, logged, logged_open, logged_raycast, logged_press, logged_reject;
     switch (p) {
     case 6:
+        if (byte_at(event, F_EVENT_BUTTON) == 0) s_left_event = event;
         if (ego_open(s_levelup)) {
             s_rel_event = event;
             s_rel_over = (void *)(uintptr_t)r[2];
             dm_mod_gate_run(r, p, release_run);
         }
         break;
+    case 7:   // LOR_InputModule.Process entry, every frame: cheap unless the EGO selection is open
+        if (s_left_event && ego_open(s_levelup)) dm_mod_gate_run(r, p, tick_run);
+        break;
     case 1:
         s_levelup = self;
         s_pressed = NULL;
+        s_hover_slot = NULL;
         if (logged_open++ < 10) LOG("[mod ego-page-select] InitEgo: LevelUpUI %p", self);
         break;
     case 2:
         if (s_levelup == self) s_levelup = NULL;
         s_pressed = NULL;
+        s_hover_slot = NULL;
         break;
     case 3:
         if (!self) break;

@@ -56,6 +56,13 @@
         "offset": "0x16ef8d0",
         "word": "a9bb7bfd",
         "reason": "LOR_InputModule.ReleaseMouse entry: x0 = the module, x1 = the PointerEventData, x2 = the object under the pointer; diagnostics log its name and parents while the EGO selection is open"
+      },
+      {
+        "gate": "ego_ui",
+        "param": 7,
+        "offset": "0x16f01f0",
+        "word": "a9be7bfd",
+        "reason": "LOR_InputModule.Process entry (x0 = the module), every frame: while the EGO selection is open a finger held on a card opens its description and highlight, as a cursor hovering it would"
       }
     ]
   }
