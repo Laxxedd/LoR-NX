@@ -1,11 +1,11 @@
 // Mod "sharp-text": UI and text at full 1080p, only the 3D scene at a lower resolution.
 // Why: in handheld mode Unity draws everything, text included, into 1280x720; MetalFX (the present's upscaler) only sees the finished frame, so it cannot add detail to small text.
 // How: Unity's dynamic resolution. The backbuffer stays at the docked size (1920x1080), cameras that render the scene get allowDynamicResolution = true and
-// ScalableBufferManager.ResizeBuffers(scale, scale) shrinks only their targets. Cameras that render nothing but the UI layer stay at full size, and so do Screen Space - Overlay canvases.
+// ScalableBufferManager.ResizeBuffers(scale, scale) shrinks only their targets. Cameras that draw the UI layer but not the Default layer stay at full size, and so do Screen Space - Overlay canvases.
 //   cam_pre     BattleCamManager.FixedUpdate entry: its _uiCam and _characterUiCam (fields) are kept at full size and logged with the other battle cameras
 //   frame_pre   InputManager.Update entry (once a frame): first hit switches a handheld run to the docked draw size; every 30 frames the cameras are flagged and the scale is re-applied if it drifted
 // Untested on a device: every step logs "[mod sharp-text] ..." so a log.txt shows which one did not hold.
-// Diagnostic env (not in the launcher): DM_MOD_SHARPTEXT_UIMASK (culling mask of a UI-only camera, hex or decimal, default 0x20 = layer 5 "UI"), DM_MOD_SHARPTEXT_DOCKED=0 (keep the operation mode as it is).
+// Diagnostic env (not in the launcher): DM_MOD_SHARPTEXT_UIMASK (layers that mark a UI camera when it does not draw the Default layer, hex or decimal, default 0x20 = layer 5 "UI"), DM_MOD_SHARPTEXT_DOCKED=0 (keep the operation mode as it is).
 // Off by default: DM_MOD_SHARPTEXT=1 turns the callback on (the launcher's Mods > Sharp Text switch, or env.txt).
 #include "dm.h"
 #include "hle_mods_gen.h"
@@ -29,6 +29,7 @@ void dm_nvn_window_size(int *w, int *h);
 #define F_MGR_MAINCAM 0x70
 #define F_ARRAY_LEN 0x18
 #define F_ARRAY_DATA 0x20
+#define K_SCENE_LAYER_BIT 0x1u
 
 static uint8_t *s_main;
 static int g_frame, g_pass, g_state;           // g_state: 0 first hit pending, 1 running, -1 wrong build
@@ -94,13 +95,13 @@ static void flag_cameras(void) {
         void *cam = *(void *const *)((uintptr_t)arr + F_ARRAY_DATA + 8 * i);
         if (!cam) continue;
         uint32_t mask = (uint32_t)FN(K_CAM_GET_CULLINGMASK, int, void *, const void *)(cam, NULL);
-        int ui_only = mask != 0 && (mask & ~g_uimask) == 0;
+        int ui_cam = (mask & g_uimask) != 0 && (mask & K_SCENE_LAYER_BIT) == 0;
         int cur = FN(K_CAM_GET_ALLOWDYN, uint8_t, void *, const void *)(cam, NULL) & 1;
         int battle_ui = cam == g_uicam[0] || cam == g_uicam[1];
-        int want = !ui_only && !battle_ui;
+        int want = !ui_cam && !battle_ui;
         if (cur != want) FN(K_CAM_SET_ALLOWDYN, void, void *, uint8_t, const void *)(cam, (uint8_t)want, NULL);
         if (want) flagged++; else kept++;
-        if (verbose) LOG("[mod sharp-text] camera %#llx cullingMask %#x -> %s", (unsigned long long)(uintptr_t)cam, mask, battle_ui ? "full size (battle UI camera)" : ui_only ? "full size (UI only)" : "scaled scene");
+        if (verbose) LOG("[mod sharp-text] camera %#llx cullingMask %#x -> %s", (unsigned long long)(uintptr_t)cam, mask, battle_ui ? "full size (battle UI camera)" : ui_cam ? "full size (UI camera)" : "scaled scene");
     }
     if (verbose) LOG("[mod sharp-text] camera set %d (frame %d): %d scene camera(s) flagged, %d UI camera(s) left at full size", g_pass, g_frame, flagged, kept);
 }
