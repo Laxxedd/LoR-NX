@@ -94,7 +94,7 @@ static void on_ego_ui(uint64_t *r, int p) {
     if (!mod_enabled() || !dm_touchscreen_mode() || !main_base()) return;
     void *self = (void *)(uintptr_t)r[0];
     void *event = (void *)(uintptr_t)r[1];
-    static int logged, logged_open, logged_raycast, logged_press, logged_reject;
+    static int logged_dump, logged_any, logged, logged_open, logged_raycast, logged_press, logged_reject;
     switch (p) {
     case 1:
         s_levelup = self;
@@ -112,9 +112,21 @@ static void on_ego_ui(uint64_t *r, int p) {
             s_raycast_ui = self;
             if (logged_raycast++ < 10) LOG("[mod ego-page-select] EGO selection open on %p: card group %p raycasts on", self, ptr_at(self, F_LU_CARD_GROUP));
             dm_mod_gate_run(r, p, raycast_run);
+            if (logged_dump++ < 4) {
+                void *slots = ptr_at(self, F_LU_EGO_SLOTS);
+                int n = int_at(slots, F_ARRAY_LENGTH);
+                LOG("[mod ego-page-select] %d EGO slots", n);
+                for (int i = 0; i < n && i < 8; i++) {
+                    void *slot = ptr_at(slots, F_ARRAY_DATA + 8u * (uintptr_t)i);
+                    LOG("[mod ego-page-select]   slot %d %p selectable %p", i, slot, ptr_at(slot, F_SLOT_SELECTABLE));
+                }
+            }
         }
         break;
     case 4:
+        if (ego_open(s_levelup) && logged_any++ < 60)
+            LOG("[mod ego-page-select] down on selectable %p button %d at (%.0f,%.0f) pointerEnter %p, EGO slot %p", self, byte_at(event, F_EVENT_BUTTON),
+                *(const float *)((uintptr_t)event + F_EVENT_POSITION), *(const float *)((uintptr_t)event + F_EVENT_POSITION + 4), ptr_at(event, 0x20u), slot_of(self));
         s_pressed = (slot_of(self) && byte_at(event, F_EVENT_BUTTON) == 0) ? self : NULL;
         if (s_pressed && logged_press++ < 20) LOG("[mod ego-page-select] press on EGO slot %p", slot_of(self));
         break;
