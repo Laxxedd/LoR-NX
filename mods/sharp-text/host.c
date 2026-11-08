@@ -2,6 +2,7 @@
 // Why: in handheld mode Unity draws everything, text included, into 1280x720; MetalFX (the present's upscaler) only sees the finished frame, so it cannot add detail to small text.
 // How: Unity's dynamic resolution. The backbuffer stays at the docked size (1920x1080), cameras that render the scene get allowDynamicResolution = true and
 // ScalableBufferManager.ResizeBuffers(scale, scale) shrinks only their targets. Cameras that draw the UI layer but not the Default layer stay at full size, and so do Screen Space - Overlay canvases.
+// Unity renders all HDR cameras of a frame into one shared scene target (one size, one resolve to the backbuffer at the end), so a full-size camera is also taken out of that chain (allowHDR and allowMSAA off) and moved behind every scaled camera (depth + 1000): the scaled frame is resolved to the backbuffer first and the full-size cameras then draw straight onto it.
 //   cam_pre     BattleCamManager.FixedUpdate entry: its _uiCam and _characterUiCam (fields) are kept at full size and logged with the other battle cameras
 //   frame_pre   InputManager.Update entry (once a frame): first hit switches a handheld run to the docked draw size; every 30 frames the cameras are flagged and the scale is re-applied if it drifted
 // Untested on a device: every step logs "[mod sharp-text] ..." so a log.txt shows which one did not hold.
@@ -22,6 +23,11 @@ void dm_nvn_window_size(int *w, int *h);
 #define K_CAM_GET_ALLOWDYN 0x17E92D0u
 #define K_CAM_GET_CULLINGMASK 0x17E9BE0u
 #define K_CAM_GET_DEPTH 0x17E9940u
+#define K_CAM_SET_DEPTH 0x17E9990u
+#define K_CAM_GET_ALLOWHDR 0x17E9150u
+#define K_CAM_SET_ALLOWHDR 0x17E91A0u
+#define K_CAM_GET_ALLOWMSAA 0x17E9210u
+#define K_CAM_SET_ALLOWMSAA 0x17E9260u
 #define K_CAM_GET_ORTHO 0x17E9510u
 #define K_CAM_GET_PIXELW 0x17EB4B0u
 #define K_CAM_GET_PIXELH 0x17EB500u
@@ -37,6 +43,7 @@ void dm_nvn_window_size(int *w, int *h);
 #define F_ARRAY_LEN 0x18
 #define F_ARRAY_DATA 0x20
 #define K_SCENE_LAYER_BIT 0x1u
+#define K_FULL_DEPTH_BASE 1000.0f
 
 static uint8_t *s_main;
 static int g_frame, g_pass, g_state;           // g_state: 0 first hit pending, 1 running, -1 wrong build
@@ -111,15 +118,21 @@ static void flag_cameras(void) {
         int battle_ui = cam == g_uicam[0] || cam == g_uicam[1];
         int want = !ui_cam && !battle_ui;
         if (cur != want) FN(K_CAM_SET_ALLOWDYN, void, void *, uint8_t, const void *)(cam, (uint8_t)want, NULL);
+        if (!want) {
+            if (FN(K_CAM_GET_ALLOWHDR, uint8_t, void *, const void *)(cam, NULL) & 1) FN(K_CAM_SET_ALLOWHDR, void, void *, uint8_t, const void *)(cam, 0, NULL);
+            if (FN(K_CAM_GET_ALLOWMSAA, uint8_t, void *, const void *)(cam, NULL) & 1) FN(K_CAM_SET_ALLOWMSAA, void, void *, uint8_t, const void *)(cam, 0, NULL);
+            float depth = FN(K_CAM_GET_DEPTH, float, void *, const void *)(cam, NULL);
+            if (depth < K_FULL_DEPTH_BASE) FN(K_CAM_SET_DEPTH, void, void *, float, const void *)(cam, depth + K_FULL_DEPTH_BASE, NULL);
+        }
         if (want) flagged++; else kept++;
         if (verbose) {
             void *tex = FN(K_CAM_GET_TARGETTEX, void *, void *, const void *)(cam, NULL);
-            LOG("[mod sharp-text] camera %#llx cullingMask %#x -> %s%s: depth %.1f ortho %d target %p size %dx%d scaled %dx%d allowDyn %d", (unsigned long long)(uintptr_t)cam, mask,
+            LOG("[mod sharp-text] camera %#llx cullingMask %#x -> %s%s: depth %.1f ortho %d target %p size %dx%d scaled %dx%d allowDyn %d hdr %d", (unsigned long long)(uintptr_t)cam, mask,
                 battle_ui ? "full size (battle UI camera)" : ui_cam ? "full size (UI camera)" : "scaled scene", settled ? " (settled)" : "",
                 FN(K_CAM_GET_DEPTH, float, void *, const void *)(cam, NULL), FN(K_CAM_GET_ORTHO, uint8_t, void *, const void *)(cam, NULL) & 1, tex,
                 FN(K_CAM_GET_PIXELW, int, void *, const void *)(cam, NULL), FN(K_CAM_GET_PIXELH, int, void *, const void *)(cam, NULL),
                 FN(K_CAM_GET_SCALEDW, int, void *, const void *)(cam, NULL), FN(K_CAM_GET_SCALEDH, int, void *, const void *)(cam, NULL),
-                FN(K_CAM_GET_ALLOWDYN, uint8_t, void *, const void *)(cam, NULL) & 1);
+                FN(K_CAM_GET_ALLOWDYN, uint8_t, void *, const void *)(cam, NULL) & 1, FN(K_CAM_GET_ALLOWHDR, uint8_t, void *, const void *)(cam, NULL) & 1);
         }
     }
     if (verbose) LOG("[mod sharp-text] camera set %d (frame %d): %d scene camera(s) flagged, %d UI camera(s) left at full size", g_pass, g_frame, flagged, kept);

@@ -1,7 +1,7 @@
 {
   "id": "sharp-text",
   "title": "Sharp Text",
-  "description": "Keeps the UI and text at full 1080p while only the 3D scene is rendered at a lower resolution (Unity dynamic resolution). Switches a handheld run to the 1080p draw size, marks every non-UI camera (a camera that draws the UI layer without the Default layer counts as UI, and in a battle the manager's own _uiCam and _characterUiCam are kept at full size) as dynamic-resolution capable and calls ScalableBufferManager.ResizeBuffers with the chosen scene scale, so the text is no longer rasterised at 720p before MetalFX scales the picture. For Library of Ruina 1.0.3.",
+  "description": "Keeps the UI and text at full 1080p while only the 3D scene is rendered at a lower resolution (Unity dynamic resolution). Switches a handheld run to the 1080p draw size, marks every non-UI camera (a camera that draws the UI layer without the Default layer counts as UI, and in a battle the manager's own _uiCam and _characterUiCam are kept at full size, drawn straight onto the backbuffer after the scaled cameras) as dynamic-resolution capable and calls ScalableBufferManager.ResizeBuffers with the chosen scene scale, so the text is no longer rasterised at 720p before MetalFX scales the picture. For Library of Ruina 1.0.3.",
   "launcher": {
     "env": "DM_MOD_SHARPTEXT",
     "category": "Performance",
