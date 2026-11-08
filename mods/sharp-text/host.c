@@ -21,6 +21,13 @@ void dm_nvn_window_size(int *w, int *h);
 #define K_CAM_SET_ALLOWDYN 0x17E9320u           // Camera.set_allowDynamicResolution
 #define K_CAM_GET_ALLOWDYN 0x17E92D0u
 #define K_CAM_GET_CULLINGMASK 0x17E9BE0u
+#define K_CAM_GET_DEPTH 0x17E9940u
+#define K_CAM_GET_ORTHO 0x17E9510u
+#define K_CAM_GET_PIXELW 0x17EB4B0u
+#define K_CAM_GET_PIXELH 0x17EB500u
+#define K_CAM_GET_SCALEDW 0x17EB550u
+#define K_CAM_GET_SCALEDH 0x17EB5A0u
+#define K_CAM_GET_TARGETTEX 0x17EB5F0u
 #define K_SBM_GET_WIDTH 0x17F8710u              // ScalableBufferManager.widthScaleFactor
 #define F_MGR_UICAM 0x50                        // BattleCamManager._uiCam
 #define F_MGR_EFFECTCAM 0x58
@@ -34,6 +41,7 @@ void dm_nvn_window_size(int *w, int *h);
 static uint8_t *s_main;
 static int g_frame, g_pass, g_state;           // g_state: 0 first hit pending, 1 running, -1 wrong build
 static float g_scale;
+static int g_settle_at;
 static void *g_uicam[2];                       // BattleCamManager._uiCam and ._characterUiCam: kept at full size
 static uint32_t g_uimask = 0x20;
 static int (*g_resize)(float, float);
@@ -79,7 +87,7 @@ static void flag_cameras(void) {
     if (!arr) return;
     uint64_t n = *(const uint64_t *)((uintptr_t)arr + F_ARRAY_LEN);
     if (n > 64) n = 64;
-    // a signature of the camera set (pointers and masks): details are logged whenever it changes (a new scene), at most 40 times
+    // a signature of the camera set (pointers and masks): details are logged whenever it changes (a new scene), at most 40 times, and once more 90 frames later with the sizes the cameras settled at
     uint64_t sig = n;
     for (uint64_t i = 0; i < n; i++) {
         void *cam = *(void *const *)((uintptr_t)arr + F_ARRAY_DATA + 8 * i);
@@ -88,8 +96,11 @@ static void flag_cameras(void) {
         sig = sig * 1099511628211ull ^ (uint64_t)(uintptr_t)cam ^ ((uint64_t)mask << 32);
     }
     static uint64_t last_sig;
-    int verbose = sig != last_sig && g_pass < 40;
-    if (verbose) { last_sig = sig; g_pass++; }
+    int settled = g_settle_at && g_frame >= g_settle_at;
+    if (settled) g_settle_at = 0;
+    int changed = sig != last_sig && g_pass < 40;
+    if (changed) { last_sig = sig; g_pass++; g_settle_at = g_frame + 90; }
+    int verbose = changed || settled;
     int flagged = 0, kept = 0;
     for (uint64_t i = 0; i < n; i++) {
         void *cam = *(void *const *)((uintptr_t)arr + F_ARRAY_DATA + 8 * i);
@@ -101,7 +112,15 @@ static void flag_cameras(void) {
         int want = !ui_cam && !battle_ui;
         if (cur != want) FN(K_CAM_SET_ALLOWDYN, void, void *, uint8_t, const void *)(cam, (uint8_t)want, NULL);
         if (want) flagged++; else kept++;
-        if (verbose) LOG("[mod sharp-text] camera %#llx cullingMask %#x -> %s", (unsigned long long)(uintptr_t)cam, mask, battle_ui ? "full size (battle UI camera)" : ui_cam ? "full size (UI camera)" : "scaled scene");
+        if (verbose) {
+            void *tex = FN(K_CAM_GET_TARGETTEX, void *, void *, const void *)(cam, NULL);
+            LOG("[mod sharp-text] camera %#llx cullingMask %#x -> %s%s: depth %.1f ortho %d target %p size %dx%d scaled %dx%d allowDyn %d", (unsigned long long)(uintptr_t)cam, mask,
+                battle_ui ? "full size (battle UI camera)" : ui_cam ? "full size (UI camera)" : "scaled scene", settled ? " (settled)" : "",
+                FN(K_CAM_GET_DEPTH, float, void *, const void *)(cam, NULL), FN(K_CAM_GET_ORTHO, uint8_t, void *, const void *)(cam, NULL) & 1, tex,
+                FN(K_CAM_GET_PIXELW, int, void *, const void *)(cam, NULL), FN(K_CAM_GET_PIXELH, int, void *, const void *)(cam, NULL),
+                FN(K_CAM_GET_SCALEDW, int, void *, const void *)(cam, NULL), FN(K_CAM_GET_SCALEDH, int, void *, const void *)(cam, NULL),
+                FN(K_CAM_GET_ALLOWDYN, uint8_t, void *, const void *)(cam, NULL) & 1);
+        }
     }
     if (verbose) LOG("[mod sharp-text] camera set %d (frame %d): %d scene camera(s) flagged, %d UI camera(s) left at full size", g_pass, g_frame, flagged, kept);
 }
