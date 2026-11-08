@@ -1,0 +1,26 @@
+{
+  "id": "post-effects",
+  "title": "Post Effects (Library of Ruina)",
+  "description": "wip",
+  "launcher": {
+    "env": "DM_MOD_POSTEFFECTS",
+    "category": "Quality of Life",
+    "label": "Post Effects (Bloom)",
+    "note": "Brings back the bloom the Switch version leaves out. May cost some fps."
+  },
+  "game": "Library of Ruina 1.0.3",
+  "gates": [
+    "bloom_pre"
+  ],
+  "host": "host.c",
+  "obs": {
+    "aeea627ddbd1214764dfef5f965e94a2": [
+      {
+        "gate": "bloom_pre",
+        "offset": "0x22da1bc",
+        "word": "aa0003f3",
+        "reason": "PostProcessingBehaviour.OnPreCull (0x22da190), before mov x19,x0: x0 = the PostProcessingBehaviour, once per camera render; profile at +0x18, its bloom model at +0x58"
+      }
+    ]
+  }
+}
