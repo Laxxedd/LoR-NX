@@ -1,0 +1,39 @@
+{
+  "id": "sharp-text",
+  "title": "Sharp Text",
+  "description": "Keeps the UI and text at full 1080p while only the 3D scene is rendered at a lower resolution (Unity dynamic resolution). Switches a handheld run to the 1080p draw size, marks every non-UI camera as dynamic-resolution capable and calls ScalableBufferManager.ResizeBuffers with the chosen scene scale, so the text is no longer rasterised at 720p before MetalFX scales the picture. For Library of Ruina 1.0.3.",
+  "launcher": {
+    "env": "DM_MOD_SHARPTEXT",
+    "category": "Performance",
+    "label": "Sharp Text",
+    "note": "Draws text and UI at full 1080p and only lowers the resolution of the game scene behind them. Best with Upscaling set to MetalFX. Switches Console mode to Docked sizes."
+  },
+  "settings": [
+    {
+      "env": "DM_MOD_SHARPTEXT_SCALE",
+      "kind": "range",
+      "label": "Scene resolution",
+      "note": "Resolution of the game scene as a share of 1080p. 67 % is 720p, the same load as handheld mode.",
+      "default": "0.67",
+      "min": 0.5,
+      "max": 1.0,
+      "step": 0.01
+    }
+  ],
+  "game": "Library of Ruina 1.0.3",
+  "gates": [
+    "frame_pre"
+  ],
+  "host": "host.c",
+  "obs": {
+    "_comment": "main build ID -> rows {gate, offset, word, reason}; offsets are RVAs of dump.cs.",
+    "aeea627ddbd1214764dfef5f965e94a2": [
+      {
+        "gate": "frame_pre",
+        "offset": "0x1ed1a80",
+        "word": "a9bb7bfd",
+        "reason": "InputManager.Update entry (once a frame, in every scene): the callback keeps the camera flags and the scene scale applied"
+      }
+    ]
+  }
+}
