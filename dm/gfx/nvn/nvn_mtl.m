@@ -1492,9 +1492,13 @@ int mtl_gpu_span(uint64_t f, uint64_t *t0, uint64_t *t1) {
     *t0 = atomic_load(&g_gpu[k].t0); *t1 = atomic_load(&g_gpu[k].t1);
     return *t1 >= *t0 && *t1;
 }
-static void rp_flush(void);
+static void rp_flush_(void);
+static void rp_flush_from(const char *fn, int line);
+#define rp_flush() rp_flush_from(__func__, __LINE__)
 static const char *cctx_snap(void);   // What is in this submission (printed into the failure line on error; defined before mtl_exec)
-static void lc_land(void);
+static void lc_land_(void);
+static void lc_land_from(const char *fn, int line);
+#define lc_land() lc_land_from(__func__, __LINE__)
 static int g_nlc;
 // A submission's CPU-side writes at its end (events, samples-passed and counter reports): run once, by its feedback handler or, when a game's SyncWait wakes on the
 // GPU's own signal of the fence first, by that waiter (DM_NVN_FAST_WAKE, on by default): the feedback handler comes 0.26 ms after the GPU end on an M2 Max
@@ -3305,7 +3309,8 @@ static void rp_end_(void) { if (g_enc) { AP_B;
     AP_E(0);
 } }
 #define SPLIT_MAX 96
-static struct { const char *fn; int line; uint64_t n, kb; } g_split[SPLIT_MAX];
+static struct { const char *fn, *vfn; int line, vline; uint64_t n, kb; } g_split[SPLIT_MAX];
+static const char *g_via_fn; static int g_via_line;
 static int g_split_n; static uint64_t g_split_f0;
 static void split_report(uint64_t f) {
     uint64_t span = f - g_split_f0; g_split_f0 = f;
@@ -3314,7 +3319,7 @@ static void split_report(uint64_t f) {
         for (int i = 0; i < g_split_n; i++) { int j = i; while (j > 0 && g_split[idx[j - 1]].kb < g_split[i].kb) { idx[j] = idx[j - 1]; j--; } idx[j] = i; }
         uint64_t tn = 0, tkb = 0; for (int i = 0; i < g_split_n; i++) { tn += g_split[i].n; tkb += g_split[i].kb; }
         MLOG("[split] frames %llu-%llu: %.1f passes and %.1f MB of attachment load / store per frame, by what ended the pass (function:line)", (unsigned long long)(f - span), (unsigned long long)f, (double)tn / (double)span, (double)tkb / 1024.0 / (double)span);
-        for (int k = 0; k < g_split_n && k < 14; k++) { int i = idx[k]; MLOG("[split]   %-28s %5d  %6.2f passes  %7.1f MB", g_split[i].fn, g_split[i].line, (double)g_split[i].n / (double)span, (double)g_split[i].kb / 1024.0 / (double)span); }
+        for (int k = 0; k < g_split_n && k < 14; k++) { int i = idx[k]; MLOG("[split]   %s:%d via %s:%d  %.2f passes  %.1f MB", g_split[i].fn, g_split[i].line, g_split[i].vfn ?: "-", g_split[i].vline, (double)g_split[i].n / (double)span, (double)g_split[i].kb / 1024.0 / (double)span); }
     }
     memset(g_split, 0, sizeof g_split); g_split_n = 0;
 }
@@ -3324,9 +3329,20 @@ static void rp_end_from(const char *fn, int line) {
     if (f && f % (uint64_t)g_gp_every == 0 && f != g_split_f0) split_report(f);
     rp_end_();
     uint64_t kb = ((g_bw_load - pl0) + (g_bw_store - ps0)) >> 10;
-    int i = 0; while (i < g_split_n && (g_split[i].line != line || strcmp(g_split[i].fn, fn))) i++;
-    if (i == g_split_n) { if (g_split_n == SPLIT_MAX) return; g_split[i].fn = fn; g_split[i].line = line; g_split_n++; }
+    int i = 0; const char *vf = g_via_fn; int vl = g_via_line;
+    while (i < g_split_n && (g_split[i].line != line || g_split[i].vline != vl || strcmp(g_split[i].fn, fn) || (g_split[i].vfn != vf && (!g_split[i].vfn || !vf || strcmp(g_split[i].vfn, vf))))) i++;
+    if (i == g_split_n) { if (g_split_n == SPLIT_MAX) return; g_split[i].fn = fn; g_split[i].line = line; g_split[i].vfn = vf; g_split[i].vline = vl; g_split_n++; }
     g_split[i].n++; g_split[i].kb += kb;
+}
+static void rp_flush_from(const char *fn, int line) {
+    int own = !g_via_fn; if (own) { g_via_fn = fn; g_via_line = line; }
+    rp_flush_();
+    if (own) g_via_fn = NULL;
+}
+static void lc_land_from(const char *fn, int line) {
+    int own = !g_via_fn; if (own) { g_via_fn = fn; g_via_line = line; }
+    lc_land_();
+    if (own) g_via_fn = NULL;
 }
 void pg_sub_begin_ext(uint64_t fence) { pg_sub_begin(fence); }
 void pg_commit_ext(id<MTLCommandBuffer> cb) { pg_commit(cb); }
@@ -3670,7 +3686,7 @@ static void rt_dims(NSUInteger *tw, NSUInteger *th) {
     *tw = t0 ? mip_extent(t0.width, level) : 16384; *th = t0 ? mip_extent(t0.height, level) : 16384;   // no targets: an attachment-less pass can be up to 16384 (bare_dims)
 }
 // There are pending clears but no draw in the pass: open a pass once to land the clears
-static void rp_flush(void) {
+static void rp_flush_(void) {
     if (g_nlc) lc_land();
     int pend = R.clear_d || R.clear_s;
     for (int i = 0; i < 8; i++) pend |= R.clear_c[i];
@@ -9407,7 +9423,7 @@ static int lc_sdx_redundant(const lc_group *g, int plane) {
     return 0;
 }
 // Land every waiting clear, oldest first, each group in a pass of its own (rp_flush's way)
-static void lc_land(void) {
+static void lc_land_(void) {
     if (!g_nlc) return;
     if (g_enc) rp_end();
     int n = g_nlc; g_nlc = 0;
