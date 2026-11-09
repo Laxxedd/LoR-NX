@@ -8,7 +8,6 @@ static uint64_t g_geo_hoisted, g_geo_hoist_runs;
 static int geo_hoist_on(void) { static int on = -1; if (on < 0) { const char *e = getenv("DM_NVN_GEO_HOIST"); on = !e || strcmp(e, "0"); } return on; }
 static id<MTLComputePipelineState> g_geo_lean_k[3];
 static void draw(const p_draw *dw, const p_draw_idx *di);
-static void lc_land(void);
 static void sub_cut(void);
 
 static int geo_cmp_index(const void *a, const void *b) {
