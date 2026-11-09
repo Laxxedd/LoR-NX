@@ -10793,11 +10793,28 @@ static int ipc_state_op(uint32_t op) {
         default: return 0;
     }
 }
+static uint64_t g_ipc_why[32], g_ipc_opn[128];
+static int ipc_no(int why, unsigned arg) {
+    uint64_t n = ++g_ipc_why[why & 31];
+    if (n == 1 || n == 100 || n == 10000 || n == 1000000) MLOG("in-pass depth-stencil clear refused: reason %d arg %u, %llu times so far, pass %llu", why, arg, (unsigned long long)n, (unsigned long long)g_stat_pass);
+    return 0;
+}
 static int ipc_try(const uint8_t *p, uint32_t sz, const p_set_rt *r0) {
-    if (!g_enc || !R.has_rt || !R.rt.depth || g_hoist_n || g_ipc_n || g_rc_skip || !tbdr_on() || !ipc_on()) return 0;
-    if (g_fz.active || g_fz_checking || g_defer_replaying || defer_has_in_p() || g_defer_natq > 0 || g_sm_pass || g_geo_program || g_enc_mode != 0) return 0;
-    if (R.clear_d || R.clear_s || !ipc_depth_only(r0) || rt_same(&R.rt, r0)) return 0;
-    for (int i = 0; i < 8; i++) if (R.clear_c[i]) return 0;
+    if (!g_enc || !tbdr_on() || !ipc_on() || !ipc_depth_only(r0)) return 0;
+    if (!R.has_rt || !R.rt.depth) return ipc_no(1, 0);
+    if (g_hoist_n) return ipc_no(2, (unsigned)g_hoist_n);
+    if (g_ipc_n) return ipc_no(3, (unsigned)g_ipc_n);
+    if (g_rc_skip) return ipc_no(4, 0);
+    if (g_fz.active || g_fz_checking) return ipc_no(5, 0);
+    if (g_defer_replaying) return ipc_no(6, 0);
+    if (defer_has_in_p()) return ipc_no(7, 0);
+    if (g_defer_natq > 0) return ipc_no(8, (unsigned)g_defer_natq);
+    if (g_sm_pass) return ipc_no(9, 0);
+    if (g_geo_program) return ipc_no(10, 0);
+    if (g_enc_mode != 0) return ipc_no(11, (unsigned)g_enc_mode);
+    if (R.clear_d || R.clear_s) return ipc_no(12, 0);
+    if (rt_same(&R.rt, r0)) return ipc_no(13, 0);
+    for (int i = 0; i < 8; i++) if (R.clear_c[i]) return ipc_no(14, (unsigned)i);
     const p_set_rt *grt[4]; int same[4]; int gcl[4] = {0, 0, 0, 0}; const uint8_t *srt[4]; ipc_ent E[8]; int ng = 1, ne = 0, done = 0;
     grt[0] = r0; same[0] = lc_same(&R.rt, 8, r0, 8); srt[0] = p;
     const uint8_t *q = p + sz;
@@ -10805,32 +10822,39 @@ static int ipc_try(const uint8_t *p, uint32_t sz, const p_set_rt *r0) {
         op_hdr h; memcpy(&h, q, sizeof h); const void *a = q + 8;
         if (h.op == OP_JUMP) { const uint8_t *t; memcpy(&t, a, 8); q = t; continue; }
         if (h.op == OP_CLEAR_DS) {
-            if (ne >= 8) return 0;
+            if (ne >= 8) return ipc_no(15, 0);
             E[ne].op = q; memcpy(&E[ne].c, a, sizeof(p_clear_ds)); E[ne].grp = ng - 1; ne++; gcl[ng - 1]++;
         } else if (h.op == OP_SET_RT) {
             const p_set_rt *r = a;
             if (rt_same(&R.rt, r)) done = 1;
             else {
-                if (ng >= 4 || !gcl[ng - 1] || !ipc_depth_only(r)) return 0;
+                if (ng >= 4) return ipc_no(16, 0);
+                if (!gcl[ng - 1]) return ipc_no(17, 0);
+                if (!ipc_depth_only(r)) return ipc_no(18, 0);
                 grt[ng] = r; same[ng] = lc_same(&R.rt, 8, r, 8); srt[ng] = q; ng++;
             }
-        } else if (!ipc_state_op(h.op)) return 0;
+        } else if (!ipc_state_op(h.op)) {
+            if (h.op < 128 && !g_ipc_opn[h.op]++) MLOG("in-pass depth-stencil clear: the detour scan met operation %u (not in the allowed list), pass %llu", (unsigned)h.op, (unsigned long long)g_stat_pass);
+            return ipc_no(19, (unsigned)h.op);
+        }
         if (!done) q += h.size;
     }
-    if (!done || !ne || !gcl[ng - 1]) return 0;
+    if (!done) return ipc_no(20, 0);
+    if (!ne || !gcl[ng - 1]) return ipc_no(21, 0);
     int nb = 0;
     for (int g = 0; g < ng; g++) {
         if (same[g]) continue;
         const tex_t *d = grt[g]->depth;
-        if (d->serial == R.rt.depth->serial || !scissor_full(d, &grt[g]->dview, grt[g]->has_dview)) return 0;
-        for (int i = 0; i < R.rt.n && i < 8; i++) if (R.rt.color[i] && R.rt.color[i]->serial == d->serial) return 0;
+        if (d->serial == R.rt.depth->serial) return ipc_no(22, 0);
+        if (!scissor_full(d, &grt[g]->dview, grt[g]->has_dview)) return ipc_no(23, 0);
+        for (int i = 0; i < R.rt.n && i < 8; i++) if (R.rt.color[i] && R.rt.color[i]->serial == d->serial) return ipc_no(24, 0);
         nb++;
     }
-    if (g_nlc + nb > LC_MAX || g_hoist_n + (ng - 1) + ne > HOIST_MAX) return 0;
+    if (g_nlc + nb > LC_MAX || g_hoist_n + (ng - 1) + ne > HOIST_MAX) return ipc_no(25, 0);
     for (int i = 0; i < ne; i++) {
         const p_clear_ds *c = &E[i].c; unsigned sm = (unsigned)c->stencil_mask & 0xff;
-        if (same[E[i].grp]) { if ((c->depth_mask && !g_pass.hd) || (sm && !g_pass.hs)) return 0; }
-        else if (sm && sm != 0xff) return 0;
+        if (same[E[i].grp]) { if ((c->depth_mask && !g_pass.hd) || (sm && !g_pass.hs)) return ipc_no(26, (unsigned)((c->depth_mask && !g_pass.hd) | ((sm && !g_pass.hs) << 1))); }
+        else if (sm && sm != 0xff) return ipc_no(27, sm);
     }
     p_set_rt rt0 = R.rt; uint8_t cf0[8]; MTLClearColor cc0[8]; uint8_t cd0f = R.clear_d, cs0f = R.clear_s; double cd0 = R.cd; uint32_t cs0 = R.cs;
     memcpy(cf0, R.clear_c, 8); memcpy(cc0, R.cc, sizeof cc0);
