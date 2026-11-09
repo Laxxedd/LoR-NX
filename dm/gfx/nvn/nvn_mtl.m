@@ -7992,11 +7992,13 @@ static int sdx_bucket(uint64_t ser, int add) {   // Returns the bucket number; r
     return -1;
 }
 static const uint8_t **g_sdx_op; static uint32_t g_sdx_nop, g_sdx_opcap;
+static uint32_t *g_sdx_unk, g_sdx_unk_n, g_sdx_unk_cap;
 static uint32_t g_exec_seq;   // Sequence number of the current operation during replay
-static uint64_t g_pp_slot[6][NTEX + 32]; static const prog_t *g_pp_prog, *g_pp_cprog; static const p_set_rt *g_pp_rt; static uint32_t g_pp_rtseq;   // g_pp_slot: textures, then images
+static uint64_t g_pp_slot[6][NTEX + 32]; static const prog_t *g_pp_prog, *g_pp_cprog; static const p_set_rt *g_pp_rt; static p_scissor g_pp_sc; static int g_pp_has_sc, g_pp_rc_state; static uint32_t g_pp_rtseq;   // g_pp_slot: textures, then images
 static uint32_t *g_rtx_seq, *g_drx_seq; static uint32_t g_rtx_n, g_rtx_cap, g_drx_n, g_drx_cap;   // This submit's SET_RT / draw sequence number tables (used by the pre-screen of the readable tile merge)
 static void seq_push(uint32_t **v, uint32_t *n, uint32_t *cap, uint32_t x) { if (*n == *cap) { *cap = *cap ? *cap * 2 : 1024; *v = realloc(*v, *cap * sizeof **v); } (*v)[(*n)++] = x; }
 static void sdx_ev_add(sdx_ev e) { if (sdx_bucket(e.ser, 0) < 0) return; if (g_sdx_n == g_sdx_cap) { g_sdx_cap = g_sdx_cap ? g_sdx_cap * 2 : 4096; g_sdx = realloc(g_sdx, g_sdx_cap * sizeof *g_sdx); g_sdx_tmp = realloc(g_sdx_tmp, g_sdx_cap * sizeof *g_sdx); } g_sdx[g_sdx_n++] = e; }
+static void sdx_unknown_add(uint32_t seq) { if (g_sdx_unk_n && g_sdx_unk[g_sdx_unk_n - 1] == seq) return; if (g_sdx_unk_n == g_sdx_unk_cap) { g_sdx_unk_cap = g_sdx_unk_cap ? g_sdx_unk_cap * 2 : 64; g_sdx_unk = realloc(g_sdx_unk, g_sdx_unk_cap * sizeof *g_sdx_unk); } g_sdx_unk[g_sdx_unk_n++] = seq; }
 static void sdx_lvsl(const view_t *v, int hv, uint16_t *lv, uint16_t *sl) { *lv = (uint16_t)(hv && v->set_levels ? v->base_level : 0); *sl = (uint16_t)(hv && v->set_layers ? v->min_layer : 0); }
 static void sdx_walk(const uint8_t *p, int depth) {
     if (depth > 64) { g_sdx_ok = 0; return; }
@@ -8020,18 +8022,22 @@ static void sdx_walk(const uint8_t *p, int depth) {
                 break; }
             case OP_CLEAR_DS: { const p_clear_ds *c = a; const p_set_rt *r = g_pp_rt; if (!r || !r->depth) break;
                 uint16_t lv, sl; sdx_lvsl(&r->dview, r->has_dview, &lv, &sl);
-                if (c->depth_mask) sdx_ev_add((sdx_ev){seq, g_pp_rtseq, r->depth->serial, p, lv, sl, SDX_CLEAR, 1, !r->has_dview, 0});
-                if ((c->stencil_mask & 0xff) == 0xff) sdx_ev_add((sdx_ev){seq, g_pp_rtseq, r->depth->serial, p, lv, sl, SDX_CLEAR, 2, !r->has_dview, 0});
+                int full = !g_pp_has_sc || (g_pp_sc.x <= 0 && g_pp_sc.y <= 0 && (int64_t)g_pp_sc.x + g_pp_sc.w >= (int64_t)mip_extent(r->depth->d.width, lv) && (int64_t)g_pp_sc.y + g_pp_sc.h >= (int64_t)mip_extent(r->depth->d.target == 0 || r->depth->d.target == 3 ? 1 : r->depth->d.height, lv));
+                if (c->depth_mask) sdx_ev_add((sdx_ev){seq, g_pp_rtseq, r->depth->serial, p, lv, sl, SDX_CLEAR, 1, !r->has_dview, (uint8_t)(full && g_pp_rc_state == 0)});
+                if ((c->stencil_mask & 0xff) == 0xff) sdx_ev_add((sdx_ev){seq, g_pp_rtseq, r->depth->serial, p, lv, sl, SDX_CLEAR, 2, !r->has_dview, (uint8_t)(full && g_pp_rc_state == 0)});
                 break; }
             case OP_BIND_TEX: case OP_BIND_TEX1: case OP_BIND_IMG: { p_bind_handles t1; const p_bind_handles *b = bind_rec(h.op, a, &t1); bh_fresh(b); int base = h.op == OP_BIND_IMG ? NTEX : 0, lim = h.op == OP_BIND_IMG ? 32 : NTEX;
                 if (b->stage < 6 && b->first >= 0 && b->first + b->n <= lim) for (int k = 0; k < b->n; k++) g_pp_slot[b->stage][base + b->first + k] = h_ser(b->h[k]);
                 break; }
             case OP_BIND_PROGRAM: { const p_bind_program *bp_ = a; if (bp_->stages & 0x20) g_pp_cprog = bp_->prog; if (bp_->stages & 0x1f) g_pp_prog = bp_->prog; break; }
+            case OP_SCISSOR: g_pp_sc = *(const p_scissor *)a; g_pp_has_sc = 1; break;
+            case OP_RENDER_COND: { const p_render_cond *rc = a; g_pp_rc_state = rc->mode >= 2 ? rc->mode == 3 : 2; break; }
             case OP_DRAW: case OP_DRAW_IDX: case OP_DISPATCH: {
                 if (h.op != OP_DISPATCH) seq_push(&g_drx_seq, &g_drx_n, &g_drx_cap, seq);
                 const prog_t *pp = h.op == OP_DISPATCH ? g_pp_cprog : g_pp_prog; __unsafe_unretained NvProg *pr = pp ? prog_get(pp) : nil;
-                if (!pr) { for (int st = 0; st < 6; st++) for (int k = 0; k < NTEX + 32; k++) if (g_pp_slot[st][k]) sdx_ev_add((sdx_ev){seq, 0, g_pp_slot[st][k], p, 0, 0, SDX_READ, 0, 0, 1}); }
+                if (!pr) { if (g_pp_rc_state != 1) sdx_unknown_add(seq); for (int st = 0; st < 6; st++) for (int k = 0; k < NTEX + 32; k++) if (g_pp_slot[st][k]) sdx_ev_add((sdx_ev){seq, 0, g_pp_slot[st][k], p, 0, 0, SDX_READ, 0, 0, 1}); }
                 else for (int st = 0; st < 6; st++) { __unsafe_unretained NvShader *sh = pr->sh[st]; if (!sh || (h.op == OP_DISPATCH) != (st == 5)) continue;
+                    if (g_pp_rc_state != 1 && (sh->rf.bindless || sh->rf.dyn)) sdx_unknown_add(seq);
                     for (int i = 0; i < sh->rf.nb; i++) { const nvn_rbind *b = &sh->rf.b[i]; int k = b->kind == NVN_RB_IMG ? NTEX + b->reg : (b->kind == NVN_RB_TEX || b->kind == NVN_RB_TBUF) ? b->reg : -1;
                         if (k < 0 || k >= NTEX + 32 || sh->stage < 0 || sh->stage >= 6) continue; uint64_t ser = g_pp_slot[sh->stage][k];
                         if (ser) sdx_ev_add((sdx_ev){seq, 0, ser, p, 0, 0, SDX_READ, 0, 0, 1}); } }
@@ -8055,13 +8061,13 @@ static void sdx_walk(const uint8_t *p, int depth) {
 static void mtl_sub_index_(const uint64_t *h, int n);
 void mtl_sub_index(const uint64_t *h, int n) { cp_stamp start = cp_begin(); mtl_sub_index_(h, n); cp_end(7, start); }
 static void mtl_sub_index_(const uint64_t *h, int n) {   // Start of submit (hle_nvn.c QueueSubmitCommands): build this submit's store lookahead index
-    g_xv_ntouch = 0; g_sdx_n = g_sdx_nop = 0; g_rtx_n = g_drx_n = 0; g_exec_seq = 0; g_sdx_ok = tbdr_on();
+    g_xv_ntouch = 0; g_sdx_n = g_sdx_nop = g_sdx_unk_n = 0; g_rtx_n = g_drx_n = 0; g_exec_seq = 0; g_sdx_ok = tbdr_on();
     if (!g_sdx_ok) { g_xv_n = 0; g_xv_block = 1; return; }   // Index unavailable: clear the ledger and add nothing in this submit (the next touch cannot be verified)
     g_xv_block = 0;
     memset(g_sdx_hk, 0, sizeof g_sdx_hk); g_sdx_nb = 0;
     for (int i = 0; i < g_xv_n; i++) sdx_bucket(g_xv[i].ser, 1);   // Textures in the ledger enter the candidate set: otherwise, when one is only sampled and not used as an attachment in this submit, its read events are not indexed and the fallback cannot see them
     if (R.has_rt) { for (int k = 0; k < R.rt.n && k < 8; k++) if (R.rt.color[k]) sdx_bucket(R.rt.color[k]->serial, 1); if (R.rt.depth) sdx_bucket(R.rt.depth->serial, 1); }   // The targets at the start of the submit (the first draw may reopen the render pass without going through SetRenderTargets)
-    g_pp_prog = S.prog; g_pp_cprog = S.cprog; g_pp_rt = NULL; g_pp_rtseq = SDX_NONE;
+    g_pp_prog = S.prog; g_pp_cprog = S.cprog; g_pp_rt = NULL; g_pp_sc = R.sc; g_pp_has_sc = R.has_sc; g_pp_rc_state = g_rc_skip ? 1 : 0; g_pp_rtseq = SDX_NONE;
     for (int st = 0; st < 6; st++) { for (int k = 0; k < NTEX; k++) g_pp_slot[st][k] = S.tex[st][k] ? h_ser(S.tex[st][k]) : 0;
                                      for (int k = 0; k < 32; k++) g_pp_slot[st][NTEX + k] = S.img[st][k] ? h_ser(S.img[st][k]) : 0; }
     for (int i = 0; i < n && g_sdx_ok; i++) sdx_walk((const uint8_t *)h[i], 0);
@@ -9342,14 +9348,37 @@ static int mdx_next(const p_draw *dw, const p_draw_idx *di) {
 typedef struct { p_set_rt rt; uint8_t clear_c[8]; MTLClearColor cc[8]; uint8_t clear_d, clear_s; double cd; uint32_t cs; } lc_group;
 enum { LC_MAX = 8 };
 static lc_group g_lc[LC_MAX]; static int g_nlc;
-static uint64_t g_lc_taken, g_lc_landed;   // clears a later pass took as its load action / clear-only passes still opened for them (the residency set line)
-void mtl_lc_stats(uint64_t *taken, uint64_t *landed) { *taken = g_lc_taken; *landed = g_lc_landed; }
+static uint64_t g_lc_taken, g_lc_landed, g_lc_dropped;   // clears taken by a later pass / clear-only passes opened / clear-only passes elided
+void mtl_lc_stats(uint64_t *taken, uint64_t *landed, uint64_t *dropped) { *taken = g_lc_taken; *landed = g_lc_landed; *dropped = g_lc_dropped; }
 static int lc_on(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_NVN_LAZY_CLEAR"); v = !(e && !strcmp(e, "0")); if (!v) MLOG("DM_NVN_LAZY_CLEAR=0: clears with no draw open a pass of their own as before"); } return v && !tbdr_on(); }
+static int lc_elide_on(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_NVN_LC_ELIDE"); v = e && !strcmp(e, "1"); if (v) MLOG("DM_NVN_LC_ELIDE=1: omit a waiting depth/stencil clear when the submission index proves a later full clear precedes every read"); } return v; }
 static int lc_same(const p_set_rt *a, int ka, const p_set_rt *b, int kb) {   // the same subresource through the same view (k = 8: depth / stencil)
     uint64_t s1, s2; int l1, l2, x1, x2; rt_sub(a, ka, &s1, &l1, &x1); rt_sub(b, kb, &s2, &l2, &x2);
     if (!s1 || s1 != s2 || l1 != l2 || x1 != x2) return 0;
     int h1 = ka == 8 ? a->has_dview : a->has_cview[ka], h2 = kb == 8 ? b->has_dview : b->has_cview[kb];
     return h1 == h2 && (!h1 || !memcmp(ka == 8 ? &a->dview : &a->cview[ka], kb == 8 ? &b->dview : &b->cview[kb], sizeof(view_t)));
+}
+static int lc_sdx_redundant(const lc_group *g, int plane) {
+    if (!lc_elide_on() || !g_sdx_ok || !g_exec_cur || !g_exec_seq) return 0;
+    uint32_t P = g_exec_seq - 1;
+    if (P >= g_sdx_nop || g_sdx_op[P] != g_exec_cur) return 0;
+    uint64_t ser = g->rt.depth ? g->rt.depth->serial : 0;
+    int b = sdx_bucket(ser, 0); if (b < 0) return 0;
+    uint32_t ul = 0, uh = g_sdx_unk_n;
+    while (ul < uh) { uint32_t m = (ul + uh) / 2; if (g_sdx_unk[m] < P) ul = m + 1; else uh = m; }
+    uint32_t unknown = ul < g_sdx_unk_n ? g_sdx_unk[ul] : SDX_NONE;
+    uint32_t lo = g_sdx_bst[b], end = g_sdx_bst[b + 1], hi = end;
+    while (lo < hi) { uint32_t m = (lo + hi) / 2; if (g_sdx[m].seq < P) lo = m + 1; else hi = m; }
+    for (uint32_t j = lo; j < end; j++) {
+        const sdx_ev *e = &g_sdx[j];
+        if (g_hoist_n && hoist_skipped(e->op)) continue;
+        if (e->kind == SDX_READ || e->kind == SDX_NEED) return 0;
+        if (e->kind == SDX_ATT) { if (e->plane == 8) return 0; continue; }
+        if (e->kind != SDX_CLEAR || !e->why || e->plane != plane || e->rtseq == SDX_NONE || e->rtseq >= g_sdx_nop) continue;
+        op_hdr rh; memcpy(&rh, g_sdx_op[e->rtseq], sizeof rh);
+        if (rh.op == OP_SET_RT && lc_same(&g->rt, 8, (const p_set_rt *)(g_sdx_op[e->rtseq] + 8), 8)) return unknown == SDX_NONE || unknown >= e->seq;
+    }
+    return 0;
 }
 // Land every waiting clear, oldest first, each group in a pass of its own (rp_flush's way)
 static void lc_land(void) {
@@ -9357,8 +9386,12 @@ static void lc_land(void) {
     if (g_enc) rp_end();
     int n = g_nlc; g_nlc = 0;
     typeof(R) save = R;
-    for (int gi = 0; gi < n; gi++) { const lc_group *g = &g_lc[gi]; int any = g->clear_d || g->clear_s; for (int i = 0; i < 8; i++) any |= g->clear_c[i];
-        if (!any || !g_cb) continue;
+    for (int gi = 0; gi < n; gi++) { lc_group *g = &g_lc[gi]; int was = g->clear_d || g->clear_s; for (int i = 0; i < 8; i++) was |= g->clear_c[i];
+        if (g->clear_d && lc_sdx_redundant(g, 1)) g->clear_d = 0;
+        if (g->clear_s && lc_sdx_redundant(g, 2)) g->clear_s = 0;
+        int any = g->clear_d || g->clear_s; for (int i = 0; i < 8; i++) any |= g->clear_c[i];
+        if (!any) { if (was) { g_lc_dropped++; if (g_lc_dropped == 1) MLOG("lazy clear pass elided: serial=%llu depth/stencil clear is superseded before any read (first case pass %llu)", (unsigned long long)(g->rt.depth ? g->rt.depth->serial : 0), (unsigned long long)g_stat_pass); } continue; }
+        if (!g_cb) continue;
         R.rt = g->rt; R.has_rt = 1; memcpy(R.clear_c, g->clear_c, sizeof R.clear_c); memcpy(R.cc, g->cc, sizeof R.cc);
         R.clear_d = g->clear_d; R.clear_s = g->clear_s; R.cd = g->cd; R.cs = g->cs;
         rp_begin_ex(1); rp_end(); g_lc_landed++; }
