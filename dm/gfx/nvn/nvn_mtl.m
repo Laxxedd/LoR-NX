@@ -7469,6 +7469,7 @@ static void defer_release_one(defer_t *d) { if (d->active) { g_defer_nact--; if 
 static void defer_clear_all(void) { for (int i = 0; i < 4; i++) defer_release_one(&g_defer_slots[i]); g_defer_nact = g_defer_natq = 0; g_defer_pend = NULL; }
 static int hoist_take(const uint8_t *p) { for (int i = 0; i < g_hoist_n; i++) if (g_hoist_skip[i] == p) { g_hoist_skip[i] = g_hoist_skip[--g_hoist_n]; return 1; } return 0; }
 enum { DS_FREE = 0, DS_USED = 1, DS_RET = 2 };
+static int ipc_chain(const uint8_t *p, uint32_t sz, const p_set_rt *r0, const uint8_t **after, int *need, ds_st *ds);
 static int g_ds_why; static int g_ds_scanned; static int g_ds_need;   // g_ds_need: need accumulated during the scan, 1 depth 2 stencil   // Diagnostics: the opcode that triggered the 'used' verdict (for a draw, records 1000 + dt*100 + dw*10 + st), and the number of ops scanned
 static int ds_scan(const uint8_t *p, ds_st *ds, int depth) {
     for (int guard = 0; guard < 1000000; guard++) {
@@ -7480,7 +7481,14 @@ static int ds_scan(const uint8_t *p, ds_st *ds, int depth) {
             case OP_JUMP: { const uint8_t *t; memcpy(&t, a, 8); p = t; continue; }
             case OP_CALL: { uint64_t t; memcpy(&t, a, 8); if (depth >= 8) return DS_USED;
                 int r = ds_scan((const uint8_t *)t, ds, depth + 1); if (r != DS_RET) return r; break; }
-            case OP_SET_RT: case OP_COPY_B2B: case OP_CLEAR_BUF: case OP_COPY_B2T: case OP_COPY_T2B: case OP_COPY_T2T: case OP_DRAW_TEX: case OP_CLEAR_TEX: case OP_DISPATCH: return DS_FREE;
+            case OP_SET_RT: {
+                const uint8_t *aft; int nd = 0;
+                if (ipc_chain(p, h.size, (const p_set_rt *)a, &aft, &nd, ds)) {
+                    g_ds_need |= nd;
+                    if (g_ds_need == 3) { g_ds_why = 2000; return DS_USED; }
+                    p = aft; continue; }
+                return DS_FREE; }
+            case OP_COPY_B2B: case OP_CLEAR_BUF: case OP_COPY_B2T: case OP_COPY_T2B: case OP_COPY_T2T: case OP_DRAW_TEX: case OP_CLEAR_TEX: case OP_DISPATCH: return DS_FREE;
             case OP_UPDATE_UB: if (!ubd_on()) return DS_FREE; break;
             case OP_CLEAR_COLOR: case OP_CLEAR_DS: g_ds_why = h.op; return DS_USED;
             case OP_BIND_STATE: { const p_bind_state *b = a; if (b->kind == 5) memcpy(ds, b->bytes, sizeof *ds); break; }
@@ -10795,8 +10803,39 @@ static int ipc_state_op(uint32_t op) {
         case OP_POLY_OFFSET: case OP_VIEWPORTS: case OP_DEPTH_RANGE: case OP_DEPTH_CLAMP: case OP_VP_SWIZZLE: case OP_BLEND_COLOR: case OP_ALPHA_REF: case OP_COPY_STRIDE:
         case OP_SET_TEX_POOL: case OP_SET_SAMP_POOL: return 1;
         case OP_UPDATE_UB: return ubd_on();
+        case OP_BARRIER: return 1;
         default: return 0;
     }
+}
+static int ipc_chain(const uint8_t *p, uint32_t sz, const p_set_rt *r0, const uint8_t **after, int *need, ds_st *ds) {
+    if (!R.has_rt || !R.rt.depth || !tbdr_on() || !ipc_on() || !ipc_depth_only(r0) || rt_same(&R.rt, r0)) return 0;
+    const p_set_rt *grt[4]; int cl[4] = {0, 0, 0, 0}, ng = 1, ne = 0, done = 0, nd = 0;
+    grt[0] = r0;
+    const uint8_t *q = p + sz;
+    for (int guard = 0; guard < 4096 && !done; guard++) {
+        op_hdr h; memcpy(&h, q, sizeof h); const void *a = q + 8;
+        if (h.op == OP_JUMP) { const uint8_t *t; memcpy(&t, a, 8); q = t; continue; }
+        if (h.op == OP_CLEAR_DS) {
+            if (ne >= 8) return 0;
+            const p_clear_ds *c = a; unsigned sm = (unsigned)c->stencil_mask & 0xff;
+            if (lc_same(&R.rt, 8, grt[ng - 1], 8)) nd |= (c->depth_mask ? 1 : 0) | (sm ? 2 : 0);
+            else if (sm && sm != 0xff) return 0;
+            ne++; cl[ng - 1]++;
+        } else if (h.op == OP_SET_RT) {
+            const p_set_rt *r = a;
+            if (rt_same(&R.rt, r)) done = 1;
+            else if (ng >= 4 || !cl[ng - 1] || !ipc_depth_only(r)) return 0;
+            else grt[ng++] = r;
+        } else if (h.op == OP_BIND_STATE) {
+            const p_bind_state *b = a;
+            if (ds && b->kind == 5) memcpy(ds, b->bytes, sizeof *ds);
+        } else if (!ipc_state_op(h.op)) return 0;
+        if (!done) q += h.size;
+    }
+    if (!done || !ne || !cl[ng - 1]) return 0;
+    op_hdr e; memcpy(&e, q, sizeof e);
+    *after = q + e.size; *need = nd;
+    return 1;
 }
 static uint64_t g_ipc_why[32], g_ipc_opn[128];
 static int ipc_no(int why, unsigned arg) {
@@ -10816,7 +10855,7 @@ static int ipc_try(const uint8_t *p, uint32_t sz, const p_set_rt *r0) {
     if (g_defer_natq > 0) return ipc_no(8, (unsigned)g_defer_natq);
     if (g_sm_pass) return ipc_no(9, 0);
     if (g_geo_program) return ipc_no(10, 0);
-    if (g_enc_mode != 0) return ipc_no(11, (unsigned)g_enc_mode);
+    if (g_enc_mode == 1) return ipc_no(11, 1);
     if (R.clear_d || R.clear_s) return ipc_no(12, 0);
     if (rt_same(&R.rt, r0)) return ipc_no(13, 0);
     for (int i = 0; i < 8; i++) if (R.clear_c[i]) return ipc_no(14, (unsigned)i);
@@ -10886,7 +10925,7 @@ static int ipc_fire(const uint8_t *p) {
         if (g_ipc[i].op != p) continue;
         p_clear_ds c = g_ipc[i].c; g_ipc[i] = g_ipc[--g_ipc_n]; hoist_take(p);
         unsigned sm = (unsigned)c.stencil_mask & 0xff;
-        if (g_enc && g_enc_mode == 0 && (!c.depth_mask || g_pass.hd) && (!sm || g_pass.hs)) {
+        if (g_enc && g_enc_mode != 1 && (!c.depth_mask || g_pass.hd) && (!sm || g_pass.hs)) {
             clear_ds_tri(&c); g_ipc_clears++;
             PD("c %llu depth-stencil clear drawn inside the pass ser=%llu depth=%g depth_mask=%d stencil=%d stencil_mask=%#x", g_stat_pass, R.rt.depth ? (unsigned long long)R.rt.depth->serial : 0ull, c.depth, c.depth_mask, c.stencil, c.stencil_mask);
             return 1;
