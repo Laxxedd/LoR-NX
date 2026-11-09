@@ -10791,6 +10791,18 @@ static int ipc_on(void) {
         if (v) MLOG("DM_NVN_DS_INPASS=1: depth-stencil clears between draws of one pass (a depth-only detour that returns to the pass's targets) no longer end it; the pass's own depth is cleared with a triangle, other targets' clears wait (lazy clears)"); }
     return v;
 }
+static int ipc_own_clear(const p_clear_ds *c) {
+    if (!tbdr_on() || !ipc_on() || !g_enc || g_enc_mode == 1 || g_sm_pass || g_fz.active || g_fz_checking || g_hoist_n || g_ipc_n || g_defer_replaying) return 0;
+    if (!R.has_rt || !R.rt.depth || R.clear_d || R.clear_s) return 0;
+    for (int i = 0; i < 8; i++) if (R.clear_c[i]) return 0;
+    unsigned sm = (unsigned)c->stencil_mask & 0xff;
+    if (!c->depth_mask && !sm) return 0;
+    if ((c->depth_mask && !g_pass.hd) || (sm && !g_pass.hs)) return 0;
+    if (!scissor_full(R.rt.depth, &R.rt.dview, R.rt.has_dview)) return 0;
+    clear_ds_tri(c); g_ipc_clears++;
+    PD("c %llu depth-stencil clear on the pass's own depth drawn inside the pass ser=%llu depth=%g depth_mask=%d stencil=%d stencil_mask=%#x", g_stat_pass, (unsigned long long)R.rt.depth->serial, c->depth, c->depth_mask, c->stencil, c->stencil_mask);
+    return 1;
+}
 static int ipc_depth_only(const p_set_rt *r) {
     if (!r->depth) return 0;
     for (int i = 0; i < r->n && i < 8; i++) if (r->color[i]) return 0;
@@ -11040,6 +11052,7 @@ void mtl_exec(const uint8_t *p) {
             case OP_CLEAR_DS: {
                 const p_clear_ds *c = a;
                 if (g_rc_skip) { PD("c %llu depth-stencil clear skipped by conditional rendering", g_stat_pass); break; }
+                if (ipc_own_clear(c)) break;
                 if (g_rt_merged || g_sm_pass) rp_end();
                 // A load-action clear covers the whole attachment and every stencil bit. A clear whose scissor does not cover the depth target, or whose stencil mask is partial, is drawn as a triangle
                 // (clear_ds_tri), in or before a pass: before the first draw and for a partial stencil mask in a pass it used to clear the whole target (PR #108)
