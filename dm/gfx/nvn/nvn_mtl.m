@@ -1493,6 +1493,7 @@ int mtl_gpu_span(uint64_t f, uint64_t *t0, uint64_t *t1) {
 static void rp_flush(void);
 static const char *cctx_snap(void);   // What is in this submission (printed into the failure line on error; defined before mtl_exec)
 static void lc_land(void);
+static int g_nlc;
 // A submission's CPU-side writes at its end (events, samples-passed and counter reports): run once, by its feedback handler or, when a game's SyncWait wakes on the
 // GPU's own signal of the fence first, by that waiter (DM_NVN_FAST_WAKE, on by default): the feedback handler comes 0.26 ms after the GPU end on an M2 Max
 typedef struct { _Atomic uint64_t fence; _Atomic int claimed; int n; post_op *ops; seg_clk *sc; uint32_t seg_last; uint64_t t_commit; } post_rec;   // t_commit: guest ns when it was committed
@@ -3644,6 +3645,7 @@ static void rt_dims(NSUInteger *tw, NSUInteger *th) {
 }
 // There are pending clears but no draw in the pass: open a pass once to land the clears
 static void rp_flush(void) {
+    if (g_nlc) lc_land();
     int pend = R.clear_d || R.clear_s;
     for (int i = 0; i < 8; i++) pend |= R.clear_c[i];
     if (pend && !g_enc && g_cb) rp_begin_ex(1);
@@ -9557,6 +9559,7 @@ static void draw_(const p_draw *dw, const p_draw_idx *di) {
         g_zskip_count++; { static int once; if (!once++) MLOG("zero-source skip: first case pass %llu", g_stat_pass + 1); }
         PD("N %llu zero-source draw skipped", g_stat_pass + 1); return; }
     if (g_nlc && !g_enc) lc_take(pr);   // waiting clears: this pass's load actions, or landed before it (see lc_take)
+    else if (g_nlc && g_enc && lc_sampled(pr)) lc_land();
     if (ixc_wanted(dw, di) && !ixc_find(dw, di)) ixc_run(dw, di);   // indirect quads / fans / 8-bit indices: converted on the GPU before the render pass, at their own place in the replay (see ixc_run)
     uint64_t mdx = 0;   // the masked copy of the record (mdx_run); a draw it could not copy waits for the count instead
     if (mdx_on) { uint64_t ind = dw ? dw->ind : di->ind, cnt = dw ? dw->mdi_cnt : di->mdi_cnt; int i = dw ? dw->mdi_i : di->mdi_i;
@@ -10714,6 +10717,107 @@ static void clear_ds_tri(const p_clear_ds *c) {
        (unsigned long)sc.x, (unsigned long)sc.y, (unsigned long)sc.width, (unsigned long)sc.height);
 }
 
+typedef struct { const uint8_t *op; p_clear_ds c; int grp; } ipc_ent;
+static ipc_ent g_ipc[8];
+static int g_ipc_n;
+static uint64_t g_ipc_clears, g_ipc_chains;
+static int ipc_on(void) {
+    static int v = -1;
+    if (v < 0) { const char *e = getenv("DM_NVN_DS_INPASS"); v = e && !strcmp(e, "1");
+        if (v) MLOG("DM_NVN_DS_INPASS=1: depth-stencil clears between draws of one pass (a depth-only detour that returns to the pass's targets) no longer end it; the pass's own depth is cleared with a triangle, other targets' clears wait (lazy clears)"); }
+    return v;
+}
+static int ipc_depth_only(const p_set_rt *r) {
+    if (!r->depth) return 0;
+    for (int i = 0; i < r->n && i < 8; i++) if (r->color[i]) return 0;
+    return 1;
+}
+static int ipc_state_op(uint32_t op) {
+    switch (op) {
+        case OP_BEGIN: case OP_BIND_PROGRAM: case OP_BIND_STATE: case OP_BIND_VATTR: case OP_BIND_VSTREAM: case OP_BIND_VBUF: case OP_BIND_VBUF1:
+        case OP_BIND_UBO: case OP_BIND_UBO_SMALL: case OP_BIND_SSBO: case OP_BIND_TEX: case OP_BIND_TEX1: case OP_BIND_SAMP: case OP_BIND_IMG: case OP_STENCIL:
+        case OP_POLY_OFFSET: case OP_VIEWPORTS: case OP_DEPTH_RANGE: case OP_DEPTH_CLAMP: case OP_VP_SWIZZLE: case OP_BLEND_COLOR: case OP_ALPHA_REF: case OP_COPY_STRIDE:
+        case OP_SET_TEX_POOL: case OP_SET_SAMP_POOL: return 1;
+        default: return 0;
+    }
+}
+static int ipc_try(const uint8_t *p, uint32_t sz, const p_set_rt *r0) {
+    if (!g_enc || !R.has_rt || !R.rt.depth || g_hoist_n || g_ipc_n || g_rc_skip || !tbdr_on() || !ipc_on()) return 0;
+    if (g_fz.active || g_fz_checking || g_defer_replaying || defer_has_in_p() || g_defer_natq > 0 || g_sm_pass || g_geo_program || g_enc_mode != 0) return 0;
+    if (R.clear_d || R.clear_s || !ipc_depth_only(r0) || rt_same(&R.rt, r0)) return 0;
+    for (int i = 0; i < 8; i++) if (R.clear_c[i]) return 0;
+    const p_set_rt *grt[4]; int same[4]; int gcl[4] = {0, 0, 0, 0}; const uint8_t *srt[4]; ipc_ent E[8]; int ng = 1, ne = 0, done = 0;
+    grt[0] = r0; same[0] = lc_same(&R.rt, 8, r0, 8); srt[0] = p;
+    const uint8_t *q = p + sz;
+    for (int guard = 0; guard < 4096 && !done; guard++) {
+        op_hdr h; memcpy(&h, q, sizeof h); const void *a = q + 8;
+        if (h.op == OP_JUMP) { const uint8_t *t; memcpy(&t, a, 8); q = t; continue; }
+        if (h.op == OP_CLEAR_DS) {
+            if (ne >= 8) return 0;
+            E[ne].op = q; memcpy(&E[ne].c, a, sizeof(p_clear_ds)); E[ne].grp = ng - 1; ne++; gcl[ng - 1]++;
+        } else if (h.op == OP_SET_RT) {
+            const p_set_rt *r = a;
+            if (rt_same(&R.rt, r)) done = 1;
+            else {
+                if (ng >= 4 || !gcl[ng - 1] || !ipc_depth_only(r)) return 0;
+                grt[ng] = r; same[ng] = lc_same(&R.rt, 8, r, 8); srt[ng] = q; ng++;
+            }
+        } else if (!ipc_state_op(h.op)) return 0;
+        if (!done) q += h.size;
+    }
+    if (!done || !ne || !gcl[ng - 1]) return 0;
+    int nb = 0;
+    for (int g = 0; g < ng; g++) {
+        if (same[g]) continue;
+        const tex_t *d = grt[g]->depth;
+        if (d->serial == R.rt.depth->serial || !scissor_full(d, &grt[g]->dview, grt[g]->has_dview)) return 0;
+        for (int i = 0; i < R.rt.n && i < 8; i++) if (R.rt.color[i] && R.rt.color[i]->serial == d->serial) return 0;
+        nb++;
+    }
+    if (g_nlc + nb > LC_MAX || g_hoist_n + (ng - 1) + ne > HOIST_MAX) return 0;
+    for (int i = 0; i < ne; i++) {
+        const p_clear_ds *c = &E[i].c; unsigned sm = (unsigned)c->stencil_mask & 0xff;
+        if (same[E[i].grp]) { if ((c->depth_mask && !g_pass.hd) || (sm && !g_pass.hs)) return 0; }
+        else if (sm && sm != 0xff) return 0;
+    }
+    p_set_rt rt0 = R.rt; uint8_t cf0[8]; MTLClearColor cc0[8]; uint8_t cd0f = R.clear_d, cs0f = R.clear_s; double cd0 = R.cd; uint32_t cs0 = R.cs;
+    memcpy(cf0, R.clear_c, 8); memcpy(cc0, R.cc, sizeof cc0);
+    for (int g = 0; g < ng; g++) {
+        if (same[g]) continue;
+        R.rt = *grt[g]; memset(R.clear_c, 0, sizeof R.clear_c); R.clear_d = R.clear_s = 0;
+        for (int i = 0; i < ne; i++) if (E[i].grp == g) {
+            const p_clear_ds *c = &E[i].c;
+            if (c->depth_mask) { R.clear_d = 1; R.cd = c->depth; }
+            if (c->stencil_mask) { R.clear_s = 1; R.cs = (uint32_t)c->stencil; }
+        }
+        lc_push();
+    }
+    R.rt = rt0; memcpy(R.clear_c, cf0, 8); memcpy(R.cc, cc0, sizeof cc0); R.clear_d = cd0f; R.clear_s = cs0f; R.cd = cd0; R.cs = cs0;
+    for (int g = 1; g < ng; g++) g_hoist_skip[g_hoist_n++] = srt[g];
+    for (int i = 0; i < ne; i++) { g_hoist_skip[g_hoist_n++] = E[i].op; if (same[E[i].grp]) g_ipc[g_ipc_n++] = E[i]; }
+    g_ipc_chains++;
+    if (g_ipc_chains == 1) MLOG("in-pass depth-stencil clear: first case pass %llu (%d targets in the detour, %d clears, %d of them on the pass's own depth)", g_stat_pass, ng, ne, g_ipc_n);
+    PD("c %llu depth-only detour kept inside the pass: %d targets, %d clears", g_stat_pass, ng, ne);
+    return 1;
+}
+static int ipc_fire(const uint8_t *p) {
+    for (int i = 0; i < g_ipc_n; i++) {
+        if (g_ipc[i].op != p) continue;
+        p_clear_ds c = g_ipc[i].c; g_ipc[i] = g_ipc[--g_ipc_n]; hoist_take(p);
+        unsigned sm = (unsigned)c.stencil_mask & 0xff;
+        if (g_enc && g_enc_mode == 0 && (!c.depth_mask || g_pass.hd) && (!sm || g_pass.hs)) {
+            clear_ds_tri(&c); g_ipc_clears++;
+            PD("c %llu depth-stencil clear drawn inside the pass ser=%llu depth=%g depth_mask=%d stencil=%d stencil_mask=%#x", g_stat_pass, R.rt.depth ? (unsigned long long)R.rt.depth->serial : 0ull, c.depth, c.depth_mask, c.stencil, c.stencil_mask);
+            return 1;
+        }
+        if (g_enc) rp_end();
+        if (c.depth_mask) { R.clear_d = 1; R.cd = c.depth; }
+        if (c.stencil_mask) { R.clear_s = 1; R.cs = (uint32_t)c.stencil; }
+        return 1;
+    }
+    return 0;
+}
+
 void mtl_exec(const uint8_t *p) {
     if (!g_state_inited) state_reset();
     static int dump_all = -1; if (dump_all < 0) dump_all = getenv("DM_NVN_PASSDUMP_ALL") != NULL;
@@ -10727,11 +10831,13 @@ void mtl_exec(const uint8_t *p) {
         // Diagnostic DM_NVN_ALLOCPROF=1: growth of the GPU allocated size is charged to the previous operation's type (rough: allocations on other threads are counted too); the memory report line appends the top 4
         if (g_allocprof < 0) g_allocprof = getenv("DM_NVN_ALLOCPROF") != NULL;
         if (g_allocprof) { static uint64_t last; static int prev = -1; uint64_t now = g_dev.currentAllocatedSize; if (prev >= 0 && prev < 64 && now > last) g_ap_bytes[prev] += now - last; last = now; prev = h.op; }
+        if (g_ipc_n && ipc_fire(p)) { p += h.size; continue; }
         if (g_hoist_n && hoist_take(p)) { if (g_fz.active && p == g_fz.rt2_op) { g_fz.phase = 2; g_rt_merged = 0; PD("F %llu merged pass enters the later pass's draws", g_stat_pass); } p += h.size; continue; }   // A pure-clear render pass already executed early / the start of a later pass already merged in   // Entering the later pass: the same-target continuation of the earlier pass ends here; the later pass reading the earlier pass's attachment is proven to be same-pixel by fz_p2_draw, and is no longer split by the continuation rule
         const void *a = p + 8;
         if (g_nlc && !lc_keeps(h.op) && !(h.op == OP_END && g_ret_n)) lc_land();   // see lc_keeps (a sub-list's end returns to its caller)
         switch (h.op) {
             case OP_END: g_exec_cur = NULL;
+                if (!g_ret_n && !g_nrest) g_ipc_n = 0;
                 if (g_hoist_n && !g_ret_n && !g_nrest) {
                     if (g_fz.active) fz_unskip();
                     if (g_hoist_n) { MLOG("[RED] pure-clear pass hoisting: %d hoisted operations were not reached by the end of the submission; cleared (should not happen)", g_hoist_n); g_hoist_n = 0; }
@@ -10778,6 +10884,7 @@ void mtl_exec(const uint8_t *p) {
             case OP_SET_RT: {
                 const p_set_rt *r = a;
                 if (defer_begin_q(p)) break;
+                if (g_enc && ipc_try(p, h.size, r)) break;
                 int pend = R.clear_d || R.clear_s; for (int i = 0; i < 8; i++) pend |= R.clear_c[i];
                 if (g_enc && !pend && R.has_rt && tbdr_on() && rt_range_same(&R.rt,r)) {
                     g_rt_merged = g_rt_range_active = g_rt_range_pending = 1; R.rt = *r; break; }
