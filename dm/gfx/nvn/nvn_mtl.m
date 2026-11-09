@@ -10840,11 +10840,13 @@ static int ipc_chain(const uint8_t *p, uint32_t sz, const p_set_rt *r0, const ui
 static uint64_t g_ipc_why[32], g_ipc_opn[128];
 static int ipc_no(int why, unsigned arg) {
     uint64_t n = ++g_ipc_why[why & 31];
+    PD("c %llu depth-only detour refused: reason %d arg %u", g_stat_pass, why, arg);
     if (n == 1 || n == 100 || n == 10000 || n == 1000000) MLOG("in-pass depth-stencil clear refused: reason %d arg %u, %llu times so far, pass %llu", why, arg, (unsigned long long)n, (unsigned long long)g_stat_pass);
     return 0;
 }
 static int ipc_try(const uint8_t *p, uint32_t sz, const p_set_rt *r0) {
-    if (!g_enc || !tbdr_on() || !ipc_on() || !ipc_depth_only(r0)) return 0;
+    if (!tbdr_on() || !ipc_on() || !ipc_depth_only(r0)) return 0;
+    if (!g_enc) { PD("c %llu depth-only detour: no open pass (merged %d, pending lazy clears %d)", g_stat_pass, g_rt_merged, g_nlc); return 0; }
     if (!R.has_rt || !R.rt.depth) return ipc_no(1, 0);
     if (g_hoist_n) return ipc_no(2, (unsigned)g_hoist_n);
     if (g_ipc_n) return ipc_no(3, (unsigned)g_ipc_n);
