@@ -10389,6 +10389,15 @@ static int rce_dead(const p_copy_t2t *c) {
 // GPU: texture -> texture (previously mislisted as a no-op, 3 times per frame on the character select page). Same size, not mirrored, same format -> blit layer by layer; the other semantics (scaling with filtering, mirroring, format change) cannot be expressed by blit: report a failure, to be implemented
 static void copy_t2t(const p_copy_t2t *c) {
     if (c->src) xv_check(c->src->serial, c->has_sv && c->sv.set_levels ? c->sv.base_level : 0, c->has_sv && c->sv.set_layers ? c->sv.min_layer : 0, "texture copy source");
+    if ((c->flags & DM_COPY_RESOLVE) && c->src && c->dst && rce_on()) {
+        id<MTLTexture> s0 = tex_mtl(c->src), d0 = tex_mtl(c->dst);
+        if (s0 && d0 && s0.sampleCount == d0.sampleCount && s0.pixelFormat == d0.pixelFormat && s0.width == d0.width && s0.height == d0.height && rce_dead(c)) {
+            zskip_del(c->dst->serial);
+            if (!g_rce_skipped++) MLOG("resolve copy elision: first case pass %llu (%lux%lu, serial %llu to %llu)", g_stat_pass, (unsigned long)s0.width, (unsigned long)s0.height, (unsigned long long)c->src->serial, (unsigned long long)c->dst->serial);
+            PD("t %llu resolve copy skipped: ser=%llu is overwritten before anything reads it", g_stat_pass, (unsigned long long)c->dst->serial);
+            return;
+        }
+    }
     rp_flush();   // Land the pending pure-clear render pass first (zero-source candidates only enter the set when the render pass ends); the blit() below would end the render pass anyway
     if (c->dst) zskip_del(c->dst->serial);
     if (c->src && c->dst && c->sr.xoffset == 0 && c->sr.yoffset == 0 && c->dr.xoffset == 0 && c->dr.yoffset == 0
@@ -10405,11 +10414,6 @@ static void copy_t2t(const p_copy_t2t *c) {
     if (!tex_level_ok(s, sl, "texture copy source") || !tex_level_ok(d, dl, "texture copy destination")) return;
     if (c->flags & DM_COPY_RESOLVE) {   // Downsample: multisample resolve into the single-sample destination (depth takes sample 0); with equal sample counts it is a plain whole copy
         if (s.sampleCount == d.sampleCount && s.pixelFormat == d.pixelFormat && s.width == d.width && s.height == d.height) {
-            if (rce_dead(c)) {
-                if (!g_rce_skipped++) MLOG("resolve copy elision: first case pass %llu (%lux%lu, serial %llu to %llu)", g_stat_pass, (unsigned long)s.width, (unsigned long)s.height, (unsigned long long)c->src->serial, (unsigned long long)c->dst->serial);
-                PD("t %llu resolve copy skipped: ser=%llu is overwritten before anything reads it", g_stat_pass, (unsigned long long)c->dst->serial);
-                return;
-            }
             g_rce_kept++;
             enc_b_copy_texture(blit(), s, sz0, sl, MTLOriginMake(0, 0, 0), MTLSizeMake(s.width, s.height, 1), d, dz0, dl, MTLOriginMake(0, 0, 0));
             return;
@@ -10790,6 +10794,7 @@ static int ipc_state_op(uint32_t op) {
         case OP_BIND_UBO: case OP_BIND_UBO_SMALL: case OP_BIND_SSBO: case OP_BIND_TEX: case OP_BIND_TEX1: case OP_BIND_SAMP: case OP_BIND_IMG: case OP_STENCIL:
         case OP_POLY_OFFSET: case OP_VIEWPORTS: case OP_DEPTH_RANGE: case OP_DEPTH_CLAMP: case OP_VP_SWIZZLE: case OP_BLEND_COLOR: case OP_ALPHA_REF: case OP_COPY_STRIDE:
         case OP_SET_TEX_POOL: case OP_SET_SAMP_POOL: return 1;
+        case OP_UPDATE_UB: return ubd_on();
         default: return 0;
     }
 }
