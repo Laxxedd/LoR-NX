@@ -10,6 +10,7 @@
 // Semantics follow the public Horizon kernel behavior (KConditionVariable / KAddressArbiter / KSynchronization of Atmosphère mesosphère).
 // All waits hang on one global lock G, with one condition variable per thread; correctness first, performance to be measured later.
 #include "dm.h"
+#include "prof.h"
 #include <errno.h>
 #include <sched.h>
 #include <signal.h>
@@ -481,6 +482,7 @@ uint32_t svc_thread_main_init(void) {
     { const char *e = getenv("DM_PREEMPT"); g_core_preempt = e ? atoi(e) != 0 : DM_GAME_CORE_PREEMPT; }
     pause_install();
     hitch_init();
+    if (dm_prof_init) dm_prof_init();
     thr_t *t = calloc(1, sizeof *t);
     pthread_cond_init(&t->cv, NULL); pthread_cond_init(&t->pcv, NULL);
     // Its affinity is its ideal core alone, as Horizon creates every thread (Mesosphere KThread::Initialize); it was 7, which a same-core handoff now takes for a thread that can run elsewhere (dm_yield_to_core_peers)
@@ -549,6 +551,49 @@ static const char *thr_name(thr_t *t, char *nb, size_t n) {   // SDK ThreadType+
     if (vm_read_overwrite(mach_task_self(), t->arg + 0x1a0, 8, (vm_address_t)&np, &got) || !np ||
         vm_read_overwrite(mach_task_self(), np, n - 1, (vm_address_t)nb, &got)) return "?";
     nb[got] = 0; return nb;
+}
+int thr_grab_port(mach_port_t port, int depth, uint64_t *pc, int *guest) {
+    int n = 0;
+    if (depth > DM_PROF_DEPTH) depth = DM_PROF_DEPTH;
+    if (thread_suspend(port) != KERN_SUCCESS) return 0;
+    arm_thread_state64_t st; mach_msg_type_number_t c = ARM_THREAD_STATE64_COUNT;
+    if (thread_get_state(port, ARM_THREAD_STATE64, (thread_state_t)&st, &c) == KERN_SUCCESS) {
+        uint64_t fp = __darwin_arm_thread_state64_get_fp(st), lr = __darwin_arm_thread_state64_get_lr(st);
+        pc[n++] = __darwin_arm_thread_state64_get_pc(st);
+        *guest = module_of((void *)pc[0]) != NULL;
+        if (lr && n < depth) pc[n++] = lr;
+        while (n < depth) {
+            uint64_t fr[2]; vm_size_t got = 0;
+            if (!fp || vm_read_overwrite(mach_task_self(), fp, 16, (vm_address_t)fr, &got) || got != 16 || !fr[1]) break;
+            if (fr[1] != pc[n - 1]) pc[n++] = fr[1];
+            if (fr[0] <= fp) break;
+            fp = fr[0];
+        }
+    }
+    thread_resume(port);
+    return n;
+}
+int thr_sample(dm_thr_sample_t *out, int max, int depth, mach_port_t *ports) {
+    int n = 0;
+    mach_port_t self = pthread_mach_thread_np(pthread_self());
+    pthread_mutex_lock(&G);
+    for (thr_t *t = g_all; t && n < max; t = t->all) {
+        if (!t->started || t->exited || !t->mport || t->mport == self) continue;
+        dm_thr_sample_t *o = &out[n];
+        memset(o, 0, sizeof *o);
+        o->handle = t->handle;
+        char nb[40]; nb[0] = 0;
+        snprintf(o->name, sizeof o->name, "%s", thr_name(t, nb, sizeof nb));
+        ports[n] = t->mport;
+        n++;
+        if (t->wkind || atomic_load(&t->sleeping)) { o->state = DM_SAMPLE_WAIT; continue; }
+        thread_basic_info_data_t bi; mach_msg_type_number_t c = THREAD_BASIC_INFO_COUNT;
+        if (thread_info(t->mport, THREAD_BASIC_INFO, (thread_info_t)&bi, &c) != KERN_SUCCESS || bi.run_state != TH_STATE_RUNNING) { o->state = DM_SAMPLE_IDLE; continue; }
+        o->n = thr_grab_port(t->mport, depth, o->pc, &o->guest);
+        o->state = o->n ? DM_SAMPLE_RUN : DM_SAMPLE_IDLE;
+    }
+    pthread_mutex_unlock(&G);
+    return n;
 }
 // All live guest threads (used by the sampler DM_SAMPLE=ms:*): fill the pthreads into out, return the count
 int thr_list(pthread_t *out, int max) {

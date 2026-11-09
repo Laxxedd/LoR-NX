@@ -39,6 +39,10 @@ No host or tool change was needed. The boot race is the game's own ([Boot](#boot
 
 - **Thread stacks placed at random in the stack region:** [the reference entry](../../../docs/reference/memory.md#thread-stacks-placed-at-random-in-the-stack-region); its check as a reproduction on the Mac (`taskpolicy -b`).
 
+## Performance
+
+- **Current:** the profile has no measurements yet. Capture with `scripts/perf.py env full` and read the run with `scripts/perf.py report` ([CPU time by game function](../../../docs/development.md#cpu-time-by-game-function)). Known: High texture quality draws the 1080p RGBA16F scene at 2x MSAA (`DM_NVN_MSAA_CAP=1` makes it single sample) and loads finer texture levels; whether the remaining cost is GPU or CPU is open.
+
 ## Open
 
 - On an iPhone: a Reception and memory, on a 6 GB phone as in issue #739.

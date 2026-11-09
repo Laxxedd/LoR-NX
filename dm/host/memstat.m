@@ -16,6 +16,7 @@
 #include <os/proc.h>
 #endif
 #include "dm.h"
+#include <stdatomic.h>
 
 void svc_guest_range(uint8_t **base, size_t *size);
 enum { C_GUEST, C_CODE, C_MALLOC, C_GPU, C_STACK, C_FILE, C_OTHER, NC };
@@ -102,9 +103,10 @@ static void *memstat_thread(void *p) {
     return NULL;
 }
 
-__attribute__((constructor)) static void memstat_start(void) {
+static _Atomic int g_memstat_on, g_thrcpu_on;
+static void memstat_start(void) {
     const char *p = getenv("DM_MEMSTAT");
-    if (!p || !*p) return;
+    if (!p || !*p || atomic_exchange(&g_memstat_on, 1)) return;
     char *path = strdup(p);
 #if TARGET_OS_IPHONE
     if (*p != '/') { size_t n = strlen(getenv("HOME")) + strlen(p) + 16; path = malloc(n); snprintf(path, n, "%s/Documents/%s", getenv("HOME"), p); }   // Relative name → the container's Documents (the container path is not known before launch)
@@ -144,12 +146,14 @@ static void *thrcpu_thread(void *p) {
     }
     return NULL;
 }
-__attribute__((constructor)) static void thrcpu_start(void) {
+static void thrcpu_start(void) {
     const char *p = getenv("DM_THRCPU");
-    if (!p || !*p) return;
+    if (!p || !*p || atomic_exchange(&g_thrcpu_on, 1)) return;
     char *spec = strdup(p);
 #if TARGET_OS_IPHONE
     if (*p != '/') { size_t n = strlen(getenv("HOME")) + strlen(p) + 16; spec = malloc(n); snprintf(spec, n, "%s/Documents/%s", getenv("HOME"), p); }
 #endif
     pthread_t th; pthread_create(&th, NULL, thrcpu_thread, spec); pthread_detach(th);
 }
+__attribute__((constructor)) static void diag_early_start(void) { memstat_start(); thrcpu_start(); }
+void dm_diag_late_init(void) { memstat_start(); thrcpu_start(); }
