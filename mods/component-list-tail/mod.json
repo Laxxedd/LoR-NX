@@ -1,0 +1,19 @@
+{
+  "id": "component-list-tail",
+  "title": "Component List Tail Skip (Library of Ruina)",
+  "description": "Skips a no-op loop in the Unity binding that copies native GetComponents results into a managed List: after the results are copied, the loop calls the array element address helper once for every unused slot up to the list's capacity and discards the result. Measured at about 10% of main-thread samples, and 26% of main-thread samples in late frames, in a Library of Ruina 1.0.3 capture. For Library of Ruina 1.0.3.",
+  "launcher": {
+    "env": "DM_MOD_COMPLISTTAIL",
+    "category": "Performance",
+    "label": "Component List Tail Skip",
+    "note": "Removes a loop that does nothing but walk the unused capacity of pooled component lists on every GetComponents call. Cuts main-thread time spent in the UI layout rebuild path."
+  },
+  "game": "Library of Ruina 1.0.3",
+  "exefs": "exefs",
+  "expect": {
+    "aeea627ddbd1214764dfef5f965e94a2": {
+      "0x73345c": "aa1303e0",
+      "0x733560": "aa1503e0"
+    }
+  }
+}
