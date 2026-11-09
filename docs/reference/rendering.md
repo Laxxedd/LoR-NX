@@ -503,6 +503,14 @@ The replay on Metal (`dm/gfx/nvn/nvn_mtl.m`) and the Vulkan and OpenGL layers. E
 - **Found on:** [Library of Ruina](../../dm/games/0100E7A019246000/README.md) (the user's fork, iPhone, docked, `DM_NVN_UB_DEFER=1`).
 - **Note:** `rp_begin_ex` returns the open pass without re-checking its planes, and the continued-pass guard in `draw` (`g_rt_merged && g_enc_mode != 0`) covers only same-target continuations; any other scan that is wrong about a pass's planes still turns the test off silently.
 
+### Dead resolve copies after a multisample cap
+
+- **Symptom:** with `DM_NVN_MSAA_CAP=1` a game's High quality still costs far more GPU time than Low although both show the same passes and attachment load / store totals; a pass dump has several `T src=<scene> dst=<resolved> ... flags=0x40000000` lines a frame, each followed by clear-only passes, and the resolved texture is sampled far fewer times than it is written.
+- **Cause:** the game resolves its multisample scene target into a single-sample texture once per camera. With the cap the source is single-sample, so the resolve is a whole-texture blit (16 MB read and 16 MB write at 1080p RGBA16F) that also ends the open render pass; the attachment ledger counts neither. When the destination is written again by the next resolve before any draw samples it, the copy has no reader.
+- **Fix:** `DM_NVN_RESOLVE_ELIDE=1` (`rce_dead` in `nvn_mtl.m`) skips a plain whole-texture resolve copy when the store look-ahead index shows that the next operation touching the destination is a resolve copy of the same source over all of it, and no draw or dispatch before it uses a program with bindless or dynamic texture access. Copies with another reader, no later overwrite in the submission, or a real multisample source are encoded as before.
+- **Check:** not run (needs the game on a device). In a `DM_NVN_PASSDUMP` of a High frame the `T src=` count should fall from nine to the number of copies a draw samples, each skipped one shows `resolve copy skipped`, and the scene composite should be unchanged.
+- **Found on:** [Library of Ruina](../../dm/games/0100E7A019246000/README.md) (the user's fork, iPhone A15, docked, High texture quality).
+
 ### Combined depth-stencil formats stay paired in passes and pipeline keys
 
 - **Symptom:** Metal aborts at pipeline creation: `depthAttachmentPixelFormat (MTLPixelFormatInvalid) and stencilAttachmentPixelFormat (MTLPixelFormatDepth32Float_Stencil8) must match`.

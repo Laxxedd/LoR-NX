@@ -8033,7 +8033,7 @@ static void sdx_walk(const uint8_t *p, int depth) {
                     if (r->depth) { uint16_t lv, sl; sdx_lvsl(&r->dview, r->has_dview, &lv, &sl); sdx_ev_add((sdx_ev){seq, g_pp_rtseq, r->depth->serial, p, lv, sl, SDX_ATT, 8, !r->has_dview, 2}); }
                 }
                 break; }
-            case OP_COPY_T2T: { const p_copy_t2t *c = a; if (c->src) sdx_ev_add((sdx_ev){seq, 0, c->src->serial, p, 0, 0, SDX_NEED, 0, 0, 3}); if (c->dst) sdx_ev_add((sdx_ev){seq, 0, c->dst->serial, p, 0, 0, SDX_NEED, 0, 0, 3}); break; }
+            case OP_COPY_T2T: { const p_copy_t2t *c = a; if (c->dst && (c->flags & DM_COPY_RESOLVE)) sdx_bucket(c->dst->serial, 1); if (c->src) sdx_ev_add((sdx_ev){seq, 0, c->src->serial, p, 0, 0, SDX_NEED, 0, 0, 3}); if (c->dst) sdx_ev_add((sdx_ev){seq, 0, c->dst->serial, p, 0, 0, SDX_NEED, 0, 0, 3}); break; }
             case OP_COPY_T2B: case OP_COPY_B2T: { const p_copy_b2t *c = a; if (c->tex) sdx_ev_add((sdx_ev){seq, 0, c->tex->serial, p, 0, 0, SDX_NEED, 0, 0, 3}); break; }
             case OP_DRAW_TEX: { const p_draw_tex *c = a; uint64_t ss = h_ser(c->h); if (ss) sdx_ev_add((sdx_ev){seq, 0, ss, p, 0, 0, SDX_NEED, 0, 0, 3});   // read as a copy's source, its targets written as a copy's destination
                 const p_set_rt *r = g_pp_rt; if (r) for (int k = 0; k < r->n && k < 8; k++) if (r->color[k]) sdx_ev_add((sdx_ev){seq, 0, r->color[k]->serial, p, 0, 0, SDX_NEED, 0, 0, 3});
@@ -10340,6 +10340,52 @@ static void draw_tex(const p_draw_tex *c) {
     }
     args_dirty_all(); g_pso_dirty = g_dss_dirty = 1;
 }
+static int rce_on(void) {
+    static int v = -1;
+    if (v < 0) { const char *e = getenv("DM_NVN_RESOLVE_ELIDE"); v = e && !strcmp(e, "1");
+        if (v) MLOG("DM_NVN_RESOLVE_ELIDE=1: a whole-texture resolve copy whose destination is overwritten by the next one before anything reads it is not encoded (needs DM_NVN_TBDR=1)"); }
+    return v;
+}
+static uint64_t g_rce_skipped, g_rce_kept;
+static int rce_full(const p_copy_t2t *c) {
+    if (!c->src || !c->dst || c->src->serial == c->dst->serial) return 0;
+    return c->sr.xoffset == 0 && c->sr.yoffset == 0 && c->dr.xoffset == 0 && c->dr.yoffset == 0 && c->sr.zoffset == 0 && c->dr.zoffset == 0
+        && c->sr.width == (int)c->src->d.width && c->sr.height == (int)c->src->d.height && c->dr.width == (int)c->dst->d.width && c->dr.height == (int)c->dst->d.height
+        && c->sr.width == c->dr.width && c->sr.height == c->dr.height && (c->sr.depth ? c->sr.depth : 1) == 1 && (c->dr.depth ? c->dr.depth : 1) == 1
+        && !(c->flags & (NVN_COPY_FLAGS_MIRROR_X_BIT | NVN_COPY_FLAGS_MIRROR_Y_BIT));
+}
+static int rce_same_sub(const p_copy_t2t *a, const p_copy_t2t *b) {
+    uint16_t l1, s1, l2, s2;
+    sdx_lvsl(&a->dv, a->has_dv, &l1, &s1); sdx_lvsl(&b->dv, b->has_dv, &l2, &s2);
+    if (l1 != l2 || s1 != s2) return 0;
+    sdx_lvsl(&a->sv, a->has_sv, &l1, &s1); sdx_lvsl(&b->sv, b->has_sv, &l2, &s2);
+    return l1 == l2 && s1 == s2;
+}
+static int rce_dead(const p_copy_t2t *c) {
+    if (!rce_on() || !tbdr_on() || !g_sdx_ok || !g_exec_cur || !g_exec_seq || g_sdx_op[g_exec_seq - 1] != g_exec_cur || g_defer_replaying || !rce_full(c)) return 0;
+    uint32_t P = g_exec_seq - 1;
+    int b = sdx_bucket(c->dst->serial, 0); if (b < 0) return 0;
+    uint32_t lo = g_sdx_bst[b], hi = g_sdx_bst[b + 1], end = hi;
+    while (lo < hi) { uint32_t m = (lo + hi) / 2; if (g_sdx[m].seq <= P) lo = m + 1; else hi = m; }
+    if (lo == end) return 0;
+    const sdx_ev *e = &g_sdx[lo];
+    if (e->kind != SDX_NEED || e->why != 3) return 0;
+    op_hdr h; memcpy(&h, e->op, sizeof h);
+    if (h.op != OP_COPY_T2T) return 0;
+    const p_copy_t2t *c2 = (const p_copy_t2t *)(e->op + 8);
+    if (!c2->src || !c2->dst || c2->dst->serial != c->dst->serial || c2->src->serial != c->src->serial || !(c2->flags & DM_COPY_RESOLVE) || !rce_full(c2) || !rce_same_sub(c, c2)) return 0;
+    const prog_t *pg = S.prog, *cp = S.cprog;
+    for (uint32_t i = P + 1; i < e->seq; i++) {
+        op_hdr o; memcpy(&o, g_sdx_op[i], sizeof o); const void *a = g_sdx_op[i] + 8;
+        if (o.op == OP_BIND_PROGRAM) { const p_bind_program *bp = a; if (bp->stages & 0x20) cp = bp->prog; if (bp->stages & 0x1f) pg = bp->prog; }
+        else if (o.op == OP_DRAW || o.op == OP_DRAW_IDX || o.op == OP_DISPATCH) {
+            const prog_t *pp = o.op == OP_DISPATCH ? cp : pg; __unsafe_unretained NvProg *pr = pp ? prog_get(pp) : nil;
+            if (!pr) return 0;
+            for (int st = 0; st < 6; st++) { __unsafe_unretained NvShader *sh = pr->sh[st]; if (sh && (sh->rf.bindless || sh->rf.dyn)) return 0; }
+        }
+    }
+    return 1;
+}
 // GPU: texture -> texture (previously mislisted as a no-op, 3 times per frame on the character select page). Same size, not mirrored, same format -> blit layer by layer; the other semantics (scaling with filtering, mirroring, format change) cannot be expressed by blit: report a failure, to be implemented
 static void copy_t2t(const p_copy_t2t *c) {
     if (c->src) xv_check(c->src->serial, c->has_sv && c->sv.set_levels ? c->sv.base_level : 0, c->has_sv && c->sv.set_layers ? c->sv.min_layer : 0, "texture copy source");
@@ -10359,6 +10405,12 @@ static void copy_t2t(const p_copy_t2t *c) {
     if (!tex_level_ok(s, sl, "texture copy source") || !tex_level_ok(d, dl, "texture copy destination")) return;
     if (c->flags & DM_COPY_RESOLVE) {   // Downsample: multisample resolve into the single-sample destination (depth takes sample 0); with equal sample counts it is a plain whole copy
         if (s.sampleCount == d.sampleCount && s.pixelFormat == d.pixelFormat && s.width == d.width && s.height == d.height) {
+            if (rce_dead(c)) {
+                if (!g_rce_skipped++) MLOG("resolve copy elision: first case pass %llu (%lux%lu, serial %llu to %llu)", g_stat_pass, (unsigned long)s.width, (unsigned long)s.height, (unsigned long long)c->src->serial, (unsigned long long)c->dst->serial);
+                PD("t %llu resolve copy skipped: ser=%llu is overwritten before anything reads it", g_stat_pass, (unsigned long long)c->dst->serial);
+                return;
+            }
+            g_rce_kept++;
             enc_b_copy_texture(blit(), s, sz0, sl, MTLOriginMake(0, 0, 0), MTLSizeMake(s.width, s.height, 1), d, dz0, dl, MTLOriginMake(0, 0, 0));
             return;
         }
