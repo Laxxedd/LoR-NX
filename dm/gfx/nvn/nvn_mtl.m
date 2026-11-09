@@ -834,7 +834,9 @@ void mtl_sub_begin(void) {
     void arena_begin(void); arena_begin();
 }
 
-static void rp_end(void);
+static void rp_end_(void);
+static void rp_end_from(const char *fn, int line);
+#define rp_end() rp_end_from(__func__, __LINE__)
 // DM_NVN_PASSGPU_SERIAL=1 (for measurement): before creating each encoder on the main command buffer, encode 'signal n+1 → wait for signal n+1' - the signal is only raised once all prior work has completed,
 // so the following encoder starts only after the previous one has fully finished; on TBDR passes no longer overlap in the pipeline, and the per-pass start-to-end span of DM_NVN_PASSGPU is that pass's exclusive time (the whole-frame total is inflated; look only at relative cost)
 static void ser_gate(void) {
@@ -3286,7 +3288,7 @@ static void rt_mirror_flush(void) {
     }
     if (g_blit) { enc_b_end(g_blit); g_blit = nil; }
 }
-static void rp_end(void) { if (g_enc) { AP_B;
+static void rp_end_(void) { if (g_enc) { AP_B;
     if (enc_label_on()) { static uint64_t lf = ~0ull, base; uint64_t f = atomic_load(&g_cur_frame); if (f != lf) { lf = f; base = g_stat_pass - 1; }   // Intra-frame serial: the same pass has the same name every frame, so the table can aggregate by name
         [(id)g_enc setLabel:[NSString stringWithFormat:@"p%02llu %dx%d %s d%d", (unsigned long long)(g_stat_pass - base), g_el_w, g_el_h, g_el_key[0] ? g_el_key : "-", g_el_draws]]; }
 #ifdef NVN_RT_RANGE_TEST
@@ -3302,6 +3304,30 @@ static void rp_end(void) { if (g_enc) { AP_B;
 #endif
     AP_E(0);
 } }
+#define SPLIT_MAX 96
+static struct { const char *fn; int line; uint64_t n, kb; } g_split[SPLIT_MAX];
+static int g_split_n; static uint64_t g_split_f0;
+static void split_report(uint64_t f) {
+    uint64_t span = f - g_split_f0; g_split_f0 = f;
+    if (span && g_split_n) {
+        int idx[SPLIT_MAX];
+        for (int i = 0; i < g_split_n; i++) { int j = i; while (j > 0 && g_split[idx[j - 1]].kb < g_split[i].kb) { idx[j] = idx[j - 1]; j--; } idx[j] = i; }
+        uint64_t tn = 0, tkb = 0; for (int i = 0; i < g_split_n; i++) { tn += g_split[i].n; tkb += g_split[i].kb; }
+        MLOG("[split] frames %llu-%llu: %.1f passes and %.1f MB of attachment load / store per frame, by what ended the pass (function:line)", (unsigned long long)(f - span), (unsigned long long)f, (double)tn / (double)span, (double)tkb / 1024.0 / (double)span);
+        for (int k = 0; k < g_split_n && k < 14; k++) { int i = idx[k]; MLOG("[split]   %-28s %5d  %6.2f passes  %7.1f MB", g_split[i].fn, g_split[i].line, (double)g_split[i].n / (double)span, (double)g_split[i].kb / 1024.0 / (double)span); }
+    }
+    memset(g_split, 0, sizeof g_split); g_split_n = 0;
+}
+static void rp_end_from(const char *fn, int line) {
+    if (!g_enc || g_gp_every <= 0) { rp_end_(); return; }
+    uint64_t pl0 = g_gp_bw_l0, ps0 = g_gp_bw_s0, f = atomic_load(&g_cur_frame);
+    if (f && f % (uint64_t)g_gp_every == 0 && f != g_split_f0) split_report(f);
+    rp_end_();
+    uint64_t kb = ((g_bw_load - pl0) + (g_bw_store - ps0)) >> 10;
+    int i = 0; while (i < g_split_n && (g_split[i].line != line || strcmp(g_split[i].fn, fn))) i++;
+    if (i == g_split_n) { if (g_split_n == SPLIT_MAX) return; g_split[i].fn = fn; g_split[i].line = line; g_split_n++; }
+    g_split[i].n++; g_split[i].kb += kb;
+}
 void pg_sub_begin_ext(uint64_t fence) { pg_sub_begin(fence); }
 void pg_commit_ext(id<MTLCommandBuffer> cb) { pg_commit(cb); }
 // The format an attachment is actually attached with: the view's format if the view changes the format and can be attached, otherwise the base texture's. Shared by attaching (attach) and pipeline prediction (pso_predict_rest) so both agree --
