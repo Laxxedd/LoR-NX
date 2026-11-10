@@ -14,7 +14,8 @@
     "bloom2_force",
     "story_post",
     "probe",
-    "combat_keep"
+    "combat_keep",
+    "combat_post"
   ],
   "host": "host.c",
   "obs": {
@@ -162,6 +163,12 @@
         "offset": "0x2b404c0",
         "word": "aa1f03e2",
         "reason": "BattleCamManager.ResetCamSetting, mov x2,xzr before bl Behaviour.set_enabled(false) on the component found on _effectCam: x0 = that component, w1 = 0 (a write to x1 reaches the call)"
+      },
+      {
+        "gate": "combat_post",
+        "offset": "0x2b40760",
+        "word": "a9444ff4",
+        "reason": "BattleCamManager.ResetCamSetting, ldp x20,x19 before its return: x19 = the manager"
       }
     ]
   }

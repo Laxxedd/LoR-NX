@@ -9,7 +9,8 @@
 //                 The game only switches it on for the "Paper" filter, so the stories that do not use it render without the v1 bloom (the 60% of stories without bloom); DM_POSTFX_STORY=0 turns this off
 //   combat_keep   BattleCamManager.ResetCamSetting, the `mov x2, xzr` before each of its five `bl Behaviour.set_enabled(false)` calls (param 0-4: _bgCamTransform, _fgCamTransform, _mainCam, _characterCam, _effectCam; w1 = 0 is already set, x0 = the component
 //                 found on that camera): when it is a PostProcessingBehaviour (v1 stack) and the camera's bit is set in DM_POSTFX_COMBAT_MASK (default 31, all), w1 becomes 1, so the game's reset leaves the combat bloom behaviours enabled
-//                 and bloom_pre then forces their bloom on; DM_POSTFX_COMBAT=0 turns this off
+//                 and bloom_pre then forces their bloom on; DM_POSTFX_COMBAT=0 turns this off; each behaviour it sees is remembered for combat_post
+//   combat_post   BattleCamManager.ResetCamSetting, the ldp x20,x19 before its return (x19 = the manager): every behaviour combat_keep remembered that is still disabled is switched on, so the combat bloom does not depend on the argument write alone
 //   probe         the entry of the other bloom sources (param: 1 v1 OnEnable, 3 v2 layer OnEnable, 4 v2 layer OnPreCull, 5 Bloom_RFX4.OnRenderImage, 6 RFX4_DistortionAndBloom.LateUpdate,
 //                 7 CameraFilterPack_Blur_Bloom.OnRenderImage, 8 UIController.SetBloomeIntensity, 9 Bloom_RFX4.OnEnable,
 //                 10 CamFilterController.SetFilter, 11 CamFilterController.BloomRoutine, 12 CamFilterController.BloomAndPillarOfLightRoutine,
@@ -188,12 +189,15 @@ static void on_bloom_pre(uint64_t *r, int p) {
             hits, (void *)bloom, (const void *)profile, was_on, was_i, was_t, bloom[F_MODEL_ENABLED], f32(bloom, F_V1_INTENSITY));
 }
 
+static uint8_t *s_combat_ppb[5];
+
 static void on_combat_keep(uint64_t *r, int p) {
     if (!mod_enabled() || !s_combat_on) return;
     const uint8_t *o = (const uint8_t *)(uintptr_t)r[0];
     const uint8_t *klass = o ? ptr(o, 0) : NULL;
     const char *name = klass ? *(const char *const *)(klass + F_CLASS_NAME) : NULL;
     if (!name || strcmp(name, "PostProcessingBehaviour") || !(s_combat_mask >> p & 1)) return;
+    if (p >= 0 && p < 5) s_combat_ppb[p] = (uint8_t *)(uintptr_t)o;
     r[1] = 1;
     static int hits;
     if (hits++ < 32)
@@ -348,11 +352,29 @@ static void on_story_post(uint64_t *r, int p) {
     if (mod_enabled() && s_story_on) dm_mod_gate_run(r, p, story_post_run);
 }
 
+static void combat_post_run(uint64_t *r, int p) {
+    (void)r; (void)p;
+    if (!main_base()) return;
+    for (int i = 0; i < 5; i++) {
+        uint8_t *pp = s_combat_ppb[i];
+        s_combat_ppb[i] = NULL;
+        if (!pp) continue;
+        if ((uint8_t)FN(K_BEHAVIOUR_GET_ENABLED, int, void *, const void *)(pp, NULL)) continue;
+        FN(K_BEHAVIOUR_SET_ENABLED, void, void *, int, const void *)(pp, 1, NULL);
+        LOG("[mod post-effects] combat: v1 behaviour %p switched on after ResetCamSetting slot %d frame %llu", (const void *)pp, i, (unsigned long long)dm_nvn_frame_count());
+    }
+}
+
+static void on_combat_post(uint64_t *r, int p) {
+    if (mod_enabled() && s_combat_on) dm_mod_gate_run(r, p, combat_post_run);
+}
+
 __attribute__((constructor)) static void mod_post_effects_attach(void) {
     gate_obs_set(MODGATE_POST_EFFECTS_BLOOM_PRE, on_bloom_pre);
     gate_obs_set(MODGATE_POST_EFFECTS_BLOOM2_FORCE, on_bloom2_force);
     gate_obs_set(MODGATE_POST_EFFECTS_PROBE, on_probe);
     gate_obs_set(MODGATE_POST_EFFECTS_STORY_POST, on_story_post);
     gate_obs_set(MODGATE_POST_EFFECTS_COMBAT_KEEP, on_combat_keep);
+    gate_obs_set(MODGATE_POST_EFFECTS_COMBAT_POST, on_combat_post);
     LOG("[mod post-effects] callbacks attached");
 }
