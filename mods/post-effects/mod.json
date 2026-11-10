@@ -84,6 +84,27 @@
         "offset": "0x2533420",
         "word": "a9bd7bfd",
         "reason": "Bloom_RFX4.OnEnable: x0 = the effect"
+      },
+      {
+        "gate": "probe",
+        "param": 10,
+        "offset": "0x2ae22b0",
+        "word": "a9bd7bfd",
+        "reason": "CamFilterController.SetFilter(string filterID): x0 = the controller (postProcessor at +0x98, bloomFilter at +0x20), x1 = the filter id"
+      },
+      {
+        "gate": "probe",
+        "param": 11,
+        "offset": "0x2ae2eb0",
+        "word": "a9bd7bfd",
+        "reason": "CamFilterController.BloomRoutine: x0 = the controller"
+      },
+      {
+        "gate": "probe",
+        "param": 12,
+        "offset": "0x2ae3530",
+        "word": "a9bd7bfd",
+        "reason": "CamFilterController.BloomAndPillarOfLightRoutine: x0 = the controller"
       }
     ]
   }
