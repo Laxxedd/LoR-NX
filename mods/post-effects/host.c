@@ -7,6 +7,9 @@
 //   bloom2_force  Bloom.IsEnabledAndSupported, at its entry (x0 = the Bloom settings blended for this camera): when `enabled` is false or intensity <= 0, enabled = true and the v2 settings below are set
 //   story_post    CamFilterController.SetFilter, the ldp just before its only return epilogue (x19 = the controller): the story camera's v1 stack (the controller's postProcessor, +0x98) is switched on when the call left it off.
 //                 The game only switches it on for the "Paper" filter, so the stories that do not use it render without the v1 bloom (the 60% of stories without bloom); DM_POSTFX_STORY=0 turns this off
+//   combat        the combat scene's three v1 behaviours are enabled by the engine and disabled again by the game (BattleCamManager.ResetCamSetting) before any of them renders, so no v1 bloom is ever drawn there:
+//                 OnDisable of a behaviour that never had a camera queues it, and the next v2 PostProcessLayer.OnPreCull (or RFX4_DistortionAndBloom.LateUpdate) at least 2 frames later switches it on again, once, for up to 900 frames;
+//                 DM_POSTFX_COMBAT=0 turns this off, DM_POSTFX_COMBAT_MASK picks which of the behaviours disabled in one frame come back (bit 0 = the first, 7 = all, the default); DM_POSTFX_CODEDUMP=1 (the default) logs the words of ResetCamSetting once
 //   probe         the entry of the other bloom sources (param: 1 v1 OnEnable, 3 v2 layer OnEnable, 4 v2 layer OnPreCull, 5 Bloom_RFX4.OnRenderImage, 6 RFX4_DistortionAndBloom.LateUpdate,
 //                 7 CameraFilterPack_Blur_Bloom.OnRenderImage, 8 UIController.SetBloomeIntensity, 9 Bloom_RFX4.OnEnable,
 //                 10 CamFilterController.SetFilter, 11 CamFilterController.BloomRoutine, 12 CamFilterController.BloomAndPillarOfLightRoutine,
@@ -15,7 +18,7 @@
 //                 param 14 logs the first render of each v1 behaviour, then every power of ten ... (is it ever rendered, and through which camera);
 //                 params 1 and 13 also log the caller and a frame pointer backtrace (main+offset) for the first 8 calls on a behaviour that has no camera yet (m_Camera is set by its first OnPreCull)
 // Documents/env.txt can change the values: v1 DM_POSTFX_BLOOM_INTENSITY (0.8), _THRESHOLD (0.6), _KNEE (0.5), _RADIUS (5.0), _ANTIFLICKER (0), DM_POSTFX_V1_FORCE (1); v2 DM_POSTFX_V2_INTENSITY (1.0), _THRESHOLD (1.0), _KNEE (0.5),
-//   _DIFFUSION (7.0), _CLAMP (65472.0); DM_POSTFX_V1=0 / DM_POSTFX_V2=0 turn one of the two forces off, DM_POSTFX_STORY (1).
+//   _DIFFUSION (7.0), _CLAMP (65472.0); DM_POSTFX_V1=0 / DM_POSTFX_V2=0 turn one of the two forces off, DM_POSTFX_STORY (1), DM_POSTFX_COMBAT (1), DM_POSTFX_COMBAT_MASK (7), DM_POSTFX_CODEDUMP (1).
 // Off by default: DM_MOD_POSTEFFECTS=1 turns the callbacks on (the launcher's Mods > Post Effects switch, or env.txt). The gates are always in the code and pass through while it is off.
 #include "dm.h"
 #include "hle_mods_gen.h"
@@ -47,6 +50,14 @@ void dm_mod_gate_run(uint64_t *regs, int param, void (*fn)(uint64_t *, int));
 
 #define F_UICONTROLLER_PPBLOOM 0x1E0
 
+#define F_OBJECT_CACHED_PTR 0x10
+#define F_CLASS_NAME 0x10
+#define RVA_RESET_CAM_SETTING 0x2B40380u
+#define RESET_CAM_SETTING_WORDS 256
+#define COMBAT_MIN_AGE 2
+#define COMBAT_MAX_AGE 900
+#define MAX_PENDING 16
+
 #define F_CFC_BLOOMFILTER 0x20
 #define F_CFC_POSTPROCESSOR 0x98
 #define F_STRING_LENGTH 0x10
@@ -55,7 +66,14 @@ void dm_mod_gate_run(uint64_t *regs, int param, void (*fn)(uint64_t *, int));
 static float s_v1_intensity = 0.8f, s_v1_threshold = 0.6f, s_v1_knee = 0.5f, s_v1_radius = 5.0f;
 static uint8_t s_v1_antiflicker;
 static float s_v2_intensity = 1.0f, s_v2_threshold = 1.0f, s_v2_knee = 0.5f, s_v2_diffusion = 7.0f, s_v2_clamp = 65472.0f;
-static int s_v1_on = 1, s_v2_on = 1, s_v1_force = 1, s_story_on = 1;
+static int s_v1_on = 1, s_v2_on = 1, s_v1_force = 1, s_story_on = 1, s_combat_on = 1, s_combat_mask = 7, s_code_dump = 1;
+
+static struct {
+    const uint8_t *obj;
+    unsigned long long frame;
+    int bit;
+} s_pend[MAX_PENDING];
+static int s_npend;
 
 static float env_float(const char *name, float def) {
     const char *v = getenv(name);
@@ -84,9 +102,12 @@ static int mod_enabled(void) {
         s_v2_on = env_float("DM_POSTFX_V2", 1) != 0;
         s_v1_force = env_float("DM_POSTFX_V1_FORCE", 1) != 0;
         s_story_on = env_float("DM_POSTFX_STORY", 1) != 0;
-        LOG("[mod post-effects] %s (DM_MOD_POSTEFFECTS=%s) v1 %s%s (intensity %.2f threshold %.2f knee %.2f radius %.2f) v2 %s (intensity %.2f threshold %.2f knee %.2f diffusion %.1f clamp %.0f) story %s",
+        s_combat_on = env_float("DM_POSTFX_COMBAT", 1) != 0;
+        s_combat_mask = (int)env_float("DM_POSTFX_COMBAT_MASK", 7);
+        s_code_dump = env_float("DM_POSTFX_CODEDUMP", 1) != 0;
+        LOG("[mod post-effects] %s (DM_MOD_POSTEFFECTS=%s) v1 %s%s (intensity %.2f threshold %.2f knee %.2f radius %.2f) v2 %s (intensity %.2f threshold %.2f knee %.2f diffusion %.1f clamp %.0f) story %s combat %s (mask %d)",
             on ? "on" : "off", v ? v : "unset", s_v1_on ? "on" : "off", s_v1_force ? " forced" : "", s_v1_intensity, s_v1_threshold, s_v1_knee, s_v1_radius,
-            s_v2_on ? "on" : "off", s_v2_intensity, s_v2_threshold, s_v2_knee, s_v2_diffusion, s_v2_clamp, s_story_on ? "on" : "off");
+            s_v2_on ? "on" : "off", s_v2_intensity, s_v2_threshold, s_v2_knee, s_v2_diffusion, s_v2_clamp, s_story_on ? "on" : "off", s_combat_on ? "on" : "off", s_combat_mask);
     }
     return on;
 }
@@ -136,6 +157,98 @@ static void string_ascii(const uint8_t *str, char *out, int cap) {
     for (int i = 0; i < len && n < cap - 1; i++)
         out[n++] = c[i] >= 0x20 && c[i] < 0x7F ? (char)c[i] : '?';
     out[n] = 0;
+}
+
+static int is_ppb(const uint8_t *o) {
+    const uint8_t *klass = o ? ptr(o, 0) : NULL;
+    const char *name = klass ? *(const char *const *)(klass + F_CLASS_NAME) : NULL;
+    return name && !strcmp(name, "PostProcessingBehaviour");
+}
+
+static void pending_add(const uint8_t *o, unsigned long long frame) {
+    int same = 0;
+    for (int i = 0; i < s_npend; i++) {
+        if (s_pend[i].obj == o) {
+            s_pend[i].frame = frame;
+            return;
+        }
+        if (s_pend[i].frame == frame) same++;
+    }
+    if (s_npend >= MAX_PENDING) return;
+    s_pend[s_npend].obj = o;
+    s_pend[s_npend].frame = frame;
+    s_pend[s_npend].bit = same;
+    s_npend++;
+    LOG("[mod post-effects] combat: v1 behaviour %p disabled before its first render at frame %llu, queued as #%d", (const void *)o, frame, same);
+}
+
+static void pending_remove(const uint8_t *o) {
+    for (int i = 0; i < s_npend; i++)
+        if (s_pend[i].obj == o) {
+            s_pend[i] = s_pend[--s_npend];
+            return;
+        }
+}
+
+static void pending_expire(unsigned long long frame) {
+    for (int i = 0; i < s_npend;) {
+        if (frame > s_pend[i].frame + COMBAT_MAX_AGE) {
+            LOG("[mod post-effects] combat: v1 behaviour %p disabled at frame %llu was not switched on again in %d frames (no trigger ran)", (const void *)s_pend[i].obj, s_pend[i].frame, COMBAT_MAX_AGE);
+            s_pend[i] = s_pend[--s_npend];
+        } else {
+            i++;
+        }
+    }
+}
+
+static void combat_flush_run(uint64_t *r, int p) {
+    (void)r;
+    (void)p;
+    if (!main_base()) return;
+    const unsigned long long frame = (unsigned long long)dm_nvn_frame_count();
+    typeof(s_pend) ready;
+    int nready = 0, keep = 0;
+    for (int i = 0; i < s_npend; i++) {
+        if (frame < s_pend[i].frame + COMBAT_MIN_AGE) s_pend[keep++] = s_pend[i];
+        else ready[nready++] = s_pend[i];
+    }
+    s_npend = keep;
+    for (int i = 0; i < nready; i++) {
+        uint8_t *o = (uint8_t *)ready[i].obj;
+        if (!(s_combat_mask >> ready[i].bit & 1)) {
+            LOG("[mod post-effects] combat: v1 behaviour %p (#%d) left disabled by DM_POSTFX_COMBAT_MASK", (void *)o, ready[i].bit);
+            continue;
+        }
+        if (!is_ppb(o) || !*(const uint64_t *)(o + F_OBJECT_CACHED_PTR)) {
+            LOG("[mod post-effects] combat: v1 behaviour %p (#%d) is gone, skipped", (void *)o, ready[i].bit);
+            continue;
+        }
+        if ((uint8_t)FN(K_BEHAVIOUR_GET_ENABLED, int, void *, const void *)(o, NULL)) continue;
+        FN(K_BEHAVIOUR_SET_ENABLED, void, void *, int, const void *)(o, 1, NULL);
+        const uint8_t *profile = ptr(o, F_PPB_PROFILE);
+        const uint8_t *bl = profile ? ptr(profile, F_PROFILE_BLOOM) : NULL;
+        LOG("[mod post-effects] combat: v1 behaviour %p (#%d) switched on again at frame %llu (disabled at frame %llu), bloom model %p enabled %d intensity %.3f threshold %.3f", (void *)o, ready[i].bit, frame,
+            ready[i].frame, (const void *)bl, bl ? bl[F_MODEL_ENABLED] : -1, bl ? f32(bl, F_V1_INTENSITY) : -1.0f, bl ? f32(bl, F_V1_THRESHOLD) : -1.0f);
+    }
+}
+
+static void combat_flush(uint64_t *r, int p) {
+    if (!s_combat_on || !main_base() || !s_npend) return;
+    static int announced;
+    if (!announced++) LOG("[mod post-effects] combat: first trigger (probe %d) with %d behaviour(s) queued, frame %llu", p, s_npend, (unsigned long long)dm_nvn_frame_count());
+    dm_mod_gate_run(r, p, combat_flush_run);
+}
+
+static void dump_reset_cam_setting(void) {
+    static int done;
+    if (done++ || !s_code_dump || !main_base()) return;
+    const uint32_t *w = (const uint32_t *)(s_main + RVA_RESET_CAM_SETTING);
+    for (int i = 0; i < RESET_CAM_SETTING_WORDS; i += 8) {
+        char line[160];
+        int n = 0;
+        for (int k = 0; k < 8; k++) n += snprintf(line + n, sizeof line - (size_t)n, " %08x", w[i + k]);
+        LOG("[mod post-effects] code BattleCamManager.ResetCamSetting main+%#x:%s", RVA_RESET_CAM_SETTING + (unsigned)i * 4u, line);
+    }
 }
 
 static void on_bloom_pre(uint64_t *r, int p) {
@@ -190,7 +303,7 @@ static void set_float_param(uint8_t *settings, int field, float v) {
 
 static void on_bloom2_force(uint64_t *r, int p) {
     (void)p;
-    if (!mod_enabled() || !s_v2_on) return;
+    if (!mod_enabled()) return;
     uint8_t *bloom = (uint8_t *)(uintptr_t)r[0];
     if (!bloom) return;
     uint8_t *en = (uint8_t *)ptr(bloom, F_V2_ENABLED);
@@ -200,7 +313,7 @@ static void on_bloom2_force(uint64_t *r, int p) {
     int log_it = mod_log_hit(&hits);
     uint8_t was_on = en[P_BOOL];
     float was_i = f32(in, P_FLOAT);
-    if (!was_on || !(was_i > 0.0f)) {
+    if (s_v2_on && (!was_on || !(was_i > 0.0f))) {
         en[P_OVERRIDE] = 1;
         en[P_BOOL] = 1;
         set_float_param(bloom, F_V2_INTENSITY, s_v2_intensity);
@@ -218,6 +331,8 @@ static void on_probe(uint64_t *r, int p) {
     if (!mod_enabled()) return;
     static int hits[16];
     if (p < 0 || p >= 16) return;
+    if (s_npend) pending_expire((unsigned long long)dm_nvn_frame_count());
+    if (p == 4 || p == 6) combat_flush(r, p);
     if (p == 1 || p == 3 || (p >= 9 && p <= 14)) hits[p]++;
     else if (!mod_log_hit(&hits[p])) return;
     const unsigned long long frame = (unsigned long long)dm_nvn_frame_count();
@@ -230,6 +345,7 @@ static void on_probe(uint64_t *r, int p) {
         LOG("[mod post-effects] probe v1 PostProcessingBehaviour.OnEnable #%d frame %llu: %p camera %p profile %p bloom model %p enabled %d intensity %.3f threshold %.3f knee %.3f radius %.3f", n, frame, (const void *)o,
             o ? (const void *)ptr(o, F_PPB_CAMERA) : NULL, (const void *)prof, (const void *)bl, bl ? bl[F_MODEL_ENABLED] : -1, bl ? f32(bl, F_V1_INTENSITY) : -1.0f,
             bl ? f32(bl, F_V1_THRESHOLD) : -1.0f, bl ? f32(bl, F_V1_KNEE) : -1.0f, bl ? f32(bl, F_V1_RADIUS) : -1.0f);
+        pending_remove(o);
         static int enable_traces;
         if (o && !ptr(o, F_PPB_CAMERA) && enable_traces < 8) {
             enable_traces++;
@@ -240,7 +356,7 @@ static void on_probe(uint64_t *r, int p) {
         LOG("[mod post-effects] probe v2 PostProcessLayer.OnEnable #%d frame %llu: %p volumeLayer 0x%x antialiasing %d", n, frame, (const void *)o, o ? *(const uint32_t *)(o + 0x20) : 0, o ? *(const int *)(o + 0x28) : -1);
         break;
     case 4:
-        LOG("[mod post-effects] probe v2 PostProcessLayer.OnPreCull #%d: %p volumeLayer 0x%x", n, (const void *)o, o ? *(const uint32_t *)(o + 0x20) : 0);
+        LOG("[mod post-effects] probe v2 PostProcessLayer.OnPreCull #%d frame %llu: %p volumeLayer 0x%x", n, frame, (const void *)o, o ? *(const uint32_t *)(o + 0x20) : 0);
         break;
     case 5:
         LOG("[mod post-effects] probe Bloom_RFX4.OnRenderImage #%d: %p threshold %.3f knee %.3f radius %.3f intensity %.3f", n, (const void *)o, o ? f32(o, 0x18) : -1.0f, o ? f32(o, 0x1C) : -1.0f,
@@ -279,9 +395,13 @@ static void on_probe(uint64_t *r, int p) {
         LOG("[mod post-effects] probe v1 PostProcessingBehaviour.OnDisable #%d frame %llu: %p camera %p profile %p bloom model %p enabled %d intensity %.3f", n, frame, (const void *)o,
             o ? (const void *)ptr(o, F_PPB_CAMERA) : NULL, (const void *)prof, (const void *)bl, bl ? bl[F_MODEL_ENABLED] : -1, bl ? f32(bl, F_V1_INTENSITY) : -1.0f);
         static int disable_traces;
-        if (o && !ptr(o, F_PPB_CAMERA) && disable_traces < 8) {
-            disable_traces++;
-            log_caller("v1 OnDisable without a camera", r, frame);
+        if (o && !ptr(o, F_PPB_CAMERA)) {
+            if (disable_traces < 8) {
+                disable_traces++;
+                log_caller("v1 OnDisable without a camera", r, frame);
+            }
+            dump_reset_cam_setting();
+            if (s_combat_on) pending_add(o, frame);
         }
         break; }
     case 14: {
