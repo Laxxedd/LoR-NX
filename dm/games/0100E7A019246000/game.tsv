@@ -39,4 +39,4 @@ shader_note	Library of Ruina shaders
 
 # ---- Performance ----
 present_snap	on
-pso_mtl4	on
+pso_mtl4	off
