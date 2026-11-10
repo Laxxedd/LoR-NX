@@ -4,7 +4,7 @@
   "description": "Fixes EGO pages being unselectable in touchscreen mode",
   "launcher": {
     "env": "DM_MOD_EGOPAGESELECT",
-    "category": "Quality of Life",
+    "category": "Fixes",
     "label": "EGO Page Selection Fix",
     "note": "Fixes EGO pages being unselectable in touchscreen mode."
   },

@@ -116,7 +116,7 @@ final class LauncherModel: ObservableObject {
         let key = String(n[n.startIndex..<eq])
         return settings.contains { $0.env == key && $0.sectionTitle == Self.modsSection } ? key : nil
     }
-    static let modCategories = ["Performance", "Quality of Life", "Content", "Miscellaneous", "Cheats"]
+    static let modCategories = ["Performance", "Quality of Life", "Fixes", "Content", "Miscellaneous", "Cheats"]
     func mods(in category: String) -> [Setting] {   // the mods (not their settings) of one group of the mods page, in the list's order; a mod with no or an unknown category is Miscellaneous
         topRows(in: Self.modsSection).filter { s in
             let c = s.category.flatMap { Self.modCategories.contains($0) ? $0 : nil } ?? "Miscellaneous"

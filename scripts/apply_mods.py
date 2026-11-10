@@ -19,7 +19,7 @@ import argparse, glob, json, os, re, shutil, struct, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIRST_GATE, LAST_GATE = 32, 63
-CATEGORIES = ('Performance', 'Quality of Life', 'Content', 'Miscellaneous', 'Cheats')   # the groups of the launcher's mods page, in the order shown; mod.json launcher "category" (default Miscellaneous)
+CATEGORIES = ('Performance', 'Quality of Life', 'Fixes', 'Content', 'Miscellaneous', 'Cheats')   # the groups of the launcher's mods page, in the order shown; mod.json launcher "category" (default Miscellaneous)
 NSO_HEADER = 0x100   # Atmosphere's IPS offsets and the .pchtxt addresses of a patch without offset_shift count from the start of the NSO file, whose header is 0x100 bytes: the text starts there
 MAX_SWITCHES = 0xE00   # dm/tools/nso_switch.py SWITCH_MAX
 

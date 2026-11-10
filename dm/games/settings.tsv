@@ -11,7 +11,7 @@
 #             platform:<ios | mac>: the app's platform (SETTINGS_PLATFORM, ios when unset), for a switch only that platform's front end reads
 #   section   Game, Controls or Performance: a heading on the single settings screen. Rows appear in table order within each section
 #             Reset to tested defaults clears all launcher choices; values fixed by an env file stay
-#   label, note  the setting's name and the line under it (may be empty; only for a setting with a cost: latency, memory, heat)
+#   label, note  the setting's name and the line under it (may be empty; only for a setting with a cost: latency, memory, heat; a literal \n in a note is a line break)
 #   option notes  optional 10th column, for a choice: value=note pairs separated by |, a literal \n in a note is a line break; the line under the label while that value is chosen (instead of note; Pointer Mode)
 #   meta      optional, key=value pairs separated by ; (settings.py META lists the keys; docs/frontends.md, The settings list, describes them):
 #             level=basic  a setting a front end shows first;  needs=<VAR>=<value>  a sub-setting, drawn only while the row that sets <VAR> has that value;  style=segmented  a choice drawn as a segmented control instead of a menu (for two or three short options)
@@ -20,7 +20,7 @@ DM_DYNAMIC_RESOLUTION	toggle	-	0	fixups:DYNAMIC_RESOLUTION	Game	Dynamic resoluti
 DM_RENDER_SCALE	range	0.5:1.0:0.05	1.0	fixups:RENDER_SCALE	Game	Render scale		level=basic
 DM_OPMODE	choice	1=Docked,0=Handheld	DM_GAME_OPMODE	always	Game	Console mode		level=basic
 DM_PRESENT_UPSCALE	choice	off=Standard,metalfx=MetalFX	off	always	Game	Upscaling	Uses more GPU time and can increase heat.
-DM_NVN_BC_ASTC_QUALITY	choice	fast=Fast,medium=Medium,thorough=High,verythorough=Thorough,exhaustive=Exhaustive	thorough	gfxapi:nvn	Game	ASTCENC Transcode Quality	Higher presets yields higher texture quality. ASTCENC only affects the game's loading times, not performance.
+DM_NVN_BC_ASTC_QUALITY	choice	fast=Fast,medium=Medium,thorough=High,verythorough=Thorough,exhaustive=Exhaustive	thorough	gfxapi:nvn	Game	ASTCENC Transcode Quality	Higher presets yields higher texture quality.\nASTCENC only affects the game's loading times,\nnot performance.
 DM_LANG	choice	languages	build:DM_LANG	languages>1	Game	Game language		level=basic
 DM_FULLSCREEN	choice	0=Window,1=Fullscreen	0	platform:mac	Game	Display mode		level=basic
 DM_SHOW_FPS	toggle	-	build:DM_SHOW_FPS	platform:ios	Game	Frame-rate counter

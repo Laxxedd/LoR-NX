@@ -20,7 +20,7 @@
         "kind": {"enum": ["choice", "range", "toggle"]},
         "section": {"description": "The heading it goes under (Game, Controls, Performance and Memory today); sections and rows come in the order to show them. A reader draws a section it does not know like the others, under its name.", "type": "string"},
         "label": {"type": "string"},
-        "note": {"description": "The line under the label; empty for most settings.", "type": "string"},
+        "note": {"description": "The line under the label; empty for most settings. It may hold line breaks.", "type": "string"},
         "default": {"description": "The tested default for this app's platform, with profile defaults resolved.", "type": "string"},
         "options": {"description": "choice: [value, label] pairs.", "type": "array", "items": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 2}},
         "min": {"description": "range: the lowest value.", "type": "number"},
