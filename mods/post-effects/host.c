@@ -35,6 +35,9 @@ void dm_mod_gate_run(uint64_t *regs, int param, void (*fn)(uint64_t *, int));
 #define K_GAMEOBJECT_GET_LAYER 0x19AFBF0u
 #define K_OBJECT_GET_NAME 0x19B4080u
 #define K_CAMERA_GET_CULLINGMASK 0x17E9BE0u
+#define K_BEHAVIOUR_ACTIVE_ENABLED 0x19AE050u
+#define K_GAMEOBJECT_ACTIVE_IN_HIERARCHY 0x19AFE30u
+#define F_OBJECT_CACHEDPTR 0x10
 
 #define F_UIC_CAMERA 0x18
 #define F_UIC_VOLUME 0x118
@@ -397,16 +400,26 @@ static void on_combat_post(uint64_t *r, int p) {
     if (mod_enabled() && s_combat_on) dm_mod_gate_run(r, p, combat_post_run);
 }
 
+static int obj_alive(const void *o) {
+    return o && *(const uint64_t *)((const uint8_t *)o + F_OBJECT_CACHEDPTR) != 0;
+}
+
 static void obj_desc(const char *what, const void *comp, char *out, int cap) {
     char name[64];
     if (!comp) {
         snprintf(out, (size_t)cap, "%s (null)", what);
         return;
     }
+    if (!obj_alive(comp)) {
+        snprintf(out, (size_t)cap, "%s %p (destroyed)", what, comp);
+        return;
+    }
     void *go = FN(K_COMPONENT_GET_GAMEOBJECT, void *, const void *, const void *)(comp, NULL);
-    int layer = go ? FN(K_GAMEOBJECT_GET_LAYER, int, void *, const void *)(go, NULL) : -1;
+    int layer = go && obj_alive(go) ? FN(K_GAMEOBJECT_GET_LAYER, int, void *, const void *)(go, NULL) : -1;
+    int in_hierarchy = go && obj_alive(go) ? (uint8_t)FN(K_GAMEOBJECT_ACTIVE_IN_HIERARCHY, int, void *, const void *)(go, NULL) : -1;
+    int active_enabled = (uint8_t)FN(K_BEHAVIOUR_ACTIVE_ENABLED, int, const void *, const void *)(comp, NULL);
     string_ascii(FN(K_OBJECT_GET_NAME, const uint8_t *, const void *, const void *)(comp, NULL), name, sizeof name);
-    snprintf(out, (size_t)cap, "%s %p \"%s\" layer %d", what, comp, name, layer);
+    snprintf(out, (size_t)cap, "%s %p \"%s\" layer %d activeInHierarchy %d activeAndEnabled %d", what, comp, name, layer, in_hierarchy, active_enabled);
 }
 
 static void ui_diag_run(uint64_t *r, int p) {
@@ -425,7 +438,7 @@ static void ui_diag_run(uint64_t *r, int p) {
     obj_desc("v2 layer", s_v2_layer, dl, sizeof dl);
     LOG("[mod post-effects] ui diag #%d frame %llu: %s global %d weight %.3f priority %.3f sharedProfile %p internalProfile %p", hits, (unsigned long long)dm_nvn_frame_count(), dv,
         vol ? vol[F_VOL_GLOBAL] : -1, vol ? f32(vol, F_VOL_WEIGHT) : -1.0f, vol ? f32(vol, F_VOL_PRIORITY) : -1.0f, vol ? (const void *)ptr(vol, F_VOL_SHAREDPROFILE) : NULL, vol ? (const void *)ptr(vol, F_VOL_INTERNALPROFILE) : NULL);
-    LOG("[mod post-effects] ui diag #%d: %s cullingMask 0x%x", hits, dc, cam ? (unsigned)FN(K_CAMERA_GET_CULLINGMASK, int, const void *, const void *)(cam, NULL) : 0u);
+    LOG("[mod post-effects] ui diag #%d: %s cullingMask 0x%x", hits, dc, obj_alive(cam) ? (unsigned)FN(K_CAMERA_GET_CULLINGMASK, int, const void *, const void *)(cam, NULL) : 0u);
     LOG("[mod post-effects] ui diag #%d: %s volumeLayer 0x%x trigger %p", hits, dl, s_v2_layer ? *(const uint32_t *)(s_v2_layer + F_LAYER_MASK) : 0u, s_v2_layer ? (const void *)ptr(s_v2_layer, F_LAYER_TRIGGER) : NULL);
     const uint8_t *en = bloom ? ptr(bloom, F_V2_ENABLED) : NULL;
     const uint8_t *in = bloom ? ptr(bloom, F_V2_INTENSITY) : NULL;
