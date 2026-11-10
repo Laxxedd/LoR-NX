@@ -1,7 +1,7 @@
 {
   "id": "post-effects",
   "title": "Post Effects (Library of Ruina)",
-  "description": "Turns bloom back on in the Switch version. Host callbacks force the bloom of the game's v1 camera stack (UnityEngine.PostProcessing, OnPreCull) on, and with stronger settings than the game's 0.25 / threshold 1.0, and the bloom of the v2 stack (UnityEngine.Rendering.PostProcessing, Bloom.IsEnabledAndSupported) on when it is off, and, in combat, switch the v1 behaviours back on after BattleCamManager.ResetCamSetting disables them before their first render, and log which of the game's bloom sources (v1, v2, RFX4_Bloom, RFX4_DistortionAndBloom, CameraFilterPack_Blur_Bloom) run and with what settings.",
+  "description": "Turns bloom back on in the Switch version. Host callbacks force the bloom of the game's v1 camera stack (UnityEngine.PostProcessing, OnPreCull) on, and with stronger settings than the game's 0.25 / threshold 1.0, and the bloom of the v2 stack (UnityEngine.Rendering.PostProcessing, Bloom.IsEnabledAndSupported) on when it is off, and, in combat, switch the v1 behaviours back on after BattleCamManager.ResetCamSetting disables them before their first render, and keep the v1 behaviours that BattleCamManager.ResetCamSetting would disable in combat enabled, and log which of the game's bloom sources (v1, v2, RFX4_Bloom, RFX4_DistortionAndBloom, CameraFilterPack_Blur_Bloom) run and with what settings.",
   "launcher": {
     "env": "DM_MOD_POSTEFFECTS",
     "category": "Quality of Life",
@@ -13,7 +13,8 @@
     "bloom_pre",
     "bloom2_force",
     "story_post",
-    "probe"
+    "probe",
+    "combat_keep"
   ],
   "host": "host.c",
   "obs": {
@@ -126,6 +127,41 @@
         "offset": "0x22dafc0",
         "word": "a9ba7bfd",
         "reason": "PostProcessingBehaviour.OnRenderImage (v1 stack): x0 = the behaviour; the bloom of the v1 stack is drawn from here"
+      },
+      {
+        "gate": "combat_keep",
+        "param": 0,
+        "offset": "0x2b40440",
+        "word": "aa1f03e2",
+        "reason": "BattleCamManager.ResetCamSetting, mov x2,xzr before bl Behaviour.set_enabled(false) on the component found on _bgCamTransform: x0 = that component, w1 = 0 (a write to x1 reaches the call)"
+      },
+      {
+        "gate": "combat_keep",
+        "param": 1,
+        "offset": "0x2b40460",
+        "word": "aa1f03e2",
+        "reason": "BattleCamManager.ResetCamSetting, mov x2,xzr before bl Behaviour.set_enabled(false) on the component found on _fgCamTransform: x0 = that component, w1 = 0 (a write to x1 reaches the call)"
+      },
+      {
+        "gate": "combat_keep",
+        "param": 2,
+        "offset": "0x2b40480",
+        "word": "aa1f03e2",
+        "reason": "BattleCamManager.ResetCamSetting, mov x2,xzr before bl Behaviour.set_enabled(false) on the component found on _mainCam: x0 = that component, w1 = 0 (a write to x1 reaches the call)"
+      },
+      {
+        "gate": "combat_keep",
+        "param": 3,
+        "offset": "0x2b404a0",
+        "word": "aa1f03e2",
+        "reason": "BattleCamManager.ResetCamSetting, mov x2,xzr before bl Behaviour.set_enabled(false) on the component found on _characterCam: x0 = that component, w1 = 0 (a write to x1 reaches the call)"
+      },
+      {
+        "gate": "combat_keep",
+        "param": 4,
+        "offset": "0x2b404c0",
+        "word": "aa1f03e2",
+        "reason": "BattleCamManager.ResetCamSetting, mov x2,xzr before bl Behaviour.set_enabled(false) on the component found on _effectCam: x0 = that component, w1 = 0 (a write to x1 reaches the call)"
       }
     ]
   }
