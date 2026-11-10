@@ -3234,7 +3234,8 @@ static void sd_finish(void);
 // the first draw does not blend and writes all channels, every covered pixel is rewritten by it, and the original content is not visible (Switch immediate-mode rendering has no such cost; on TBDR load = reading the whole thing from memory into the tile)
 static const p_draw *g_fd_dw; static const p_draw_idx *g_fd_di;   // The draw that opens the pass (one of non-indexed / indexed); non-null only while draw() is opening a pass
 static uint64_t g_fd_n;         // Cumulative number of attachments judged elidable
-static int g_fd_why;            // Reason for the most recent failure (Q line of PASSDUMP: 1 no program 2 shader 3 attachment 4 blend/mask/raster 5 depth-stencil test 6 vertex count 7 position attribute 8 format/stream 9 out of bounds 10 address 11 geometry)
+static void fd_diag(int i);
+static int g_fd_why;            // Reason for the most recent failure (Q line of PASSDUMP: 1 no program 20 rasterizer discard 21 no shader 22 vertex position is not taken as-is from an attribute 23 fragment may discard 24 alpha test 25 logic op 26 writes sample mask 27 colour not written 3 attachment 4 blend/mask/raster 5 depth-stencil test 6 vertex count 7 position attribute 8 format/stream 9 out of bounds 10 address 11 geometry)
 static int first_draw_covers(int i, id<MTLTexture> t, NSUInteger level);
 static int pf_is_float(MTLPixelFormat f) {   // Float color formats that can store NaN (sentinel choice for the load-elision probe; RGB9E5 cannot store NaN and does not count)
     switch (f) { case MTLPixelFormatR16Float: case MTLPixelFormatRG16Float: case MTLPixelFormatRGBA16Float: case MTLPixelFormatR32Float:
@@ -3496,7 +3497,7 @@ static id<MTL4RenderCommandEncoder> rp_begin_ex_(int clear_only) {
         if (R.clear_c[i]) PD("C %llu c%d cleared to %g,%g,%g,%g", g_stat_pass + 1, i, R.cc[i].red, R.cc[i].green, R.cc[i].blue, R.cc[i].alpha);
         if (bcrt_is(pd.colorAttachments[i].texture)) { pd.colorAttachments[i].storeAction = MTLStoreActionStore; continue; }   // a shadow (bcrt_attach): loaded and stored as is, outside the bookkeeping below
         int cov = tbdr_on() && !R.clear_c[i] && (g_fd_dw || g_fd_di) && fz_load_covers(i, pd.colorAttachments[i].texture, pd.colorAttachments[i].level);
-        if (!R.clear_c[i] && (g_fd_dw || g_fd_di) && !cov) PD("Q %llu c%d load cannot be skipped why=%d", g_stat_pass + 1, i, g_fd_why);
+        if (!R.clear_c[i] && (g_fd_dw || g_fd_di) && !cov) { PD("Q %llu c%d load cannot be skipped why=%d", g_stat_pass + 1, i, g_fd_why); if (passdump()) fd_diag(i); }
         if (cov) {
             static int probe = -1; if (probe < 0) { probe = getenv("DM_NVN_LOADPROBE") ? atoi(getenv("DM_NVN_LOADPROBE")) : 0; if (probe) MLOG("DM_NVN_LOADPROBE: attachments whose load can be skipped are cleared to a sentinel color and read back to check"); }
             if (probe) { pd.colorAttachments[i].loadAction = MTLLoadActionClear; int pm = probe == 1 && pf_is_float(pd.colorAttachments[i].texture.pixelFormat) ? 3 : probe;   // Float formats use a NaN sentinel by default: a fixed sentinel value can be hit by real output (it has been hit in practice)
@@ -7605,13 +7606,40 @@ static int attr_read(int a, const p_draw *dw, const p_draw_idx *di, float P[64][
     }
     return 0;
 }
+static void fd_diag(int i) {
+    const p_draw *dw = g_fd_dw; const p_draw_idx *di = g_fd_di;
+    int n = dw ? dw->count : di->count, prim = dw ? dw->prim : di->prim;
+    __unsafe_unretained NvProg *pr = S.prog ? prog_get(S.prog) : nil; if (!pr) return;
+    NvShader *vs = pr->sh[0], *fs = pr->sh[1]; if (!vs || !fs) return;
+    PD("Q %llu c%d diag prim=%d n=%d pos_attr=%d pos_w1=%d may_discard=%d atest=%d lop=%d smask=%d cmask=%#x known=%d blend=%d chmask=%#x a2c=%d vp=%g,%g,%g,%g has_vp=%d sc=%d,%d,%d,%d has_sc=%d", g_stat_pass + 1, i, prim, n,
+       vs->rf.pos_attr, vs->rf.pos_w1, fs->rf.may_discard, atest_on(), lop_on(), fs->rf.writes_smask, (unsigned)fs->rf.color_mask, fs->rf.color_known, (S.color.blend_en >> i) & 1, (unsigned)((S.chmask.mask >> (4 * i)) & 0xf), S.ms.a2c,
+       S.vp[0][0], S.vp[0][1], S.vp[0][2], S.vp[0][3], S.has_vp, R.sc.x, R.sc.y, R.sc.w, R.sc.h, R.has_sc);
+    float P[64][4];
+    for (int a = 0; a < S.nattr && a < 4 && n <= 8; a++) {
+        if (attr_read(a, dw, di, P)) continue;
+        char b[512]; int o = 0; for (int k = 0; k < n && o < 440; k++) o += snprintf(b + o, sizeof b - (size_t)o, "(%g,%g,%g,%g) ", P[k][0], P[k][1], P[k][2], P[k][3]);
+        PD("Q %llu c%d diag attr%d fmt=%d: %s", g_stat_pass + 1, i, a, (int)S.attr[a].fmt, b);
+    }
+    for (int r = 0; r < 8; r++) { const p_bind_buf *u = &S.ubo[0][r]; if (!u->addr || !u->size) continue;
+        void *m; uint64_t off; uint64_t len = MIN(u->size, (uint64_t)128); if (!mtl_addr(u->addr, len, &m, &off)) continue;
+        const uint8_t *base = [(__bridge id<MTLBuffer>)m contents]; if (!base) continue;
+        float f[32]; memcpy(f, base + off, len); char b[1024]; int o = 0; for (uint64_t k = 0; k < len / 4 && o < 900; k++) o += snprintf(b + o, sizeof b - (size_t)o, "%g ", f[k]);
+        PD("Q %llu c%d diag vs ubo%d size=%llu: %s", g_stat_pass + 1, i, r, (unsigned long long)u->size, b);
+    }
+}
 static int first_draw_covers(int i, id<MTLTexture> t, NSUInteger level) {
-    if (S.rast_discard) return g_fd_why = 2, 0;
+    if (S.rast_discard) return g_fd_why = 20, 0;
     const p_draw *dw = g_fd_dw; const p_draw_idx *di = g_fd_di;
     int n = dw ? dw->count : di->count, prim = dw ? dw->prim : di->prim;
     __unsafe_unretained NvProg *pr = S.prog ? prog_get(S.prog) : nil; if (!pr) return g_fd_why = 1, 0;
     NvShader *vs = pr->sh[0], *fs = pr->sh[1];
-    if (!vs || !fs || vs->rf.pos_attr < 0 || fs->rf.may_discard || atest_on() || lop_on() || fs->rf.writes_smask || !(fs->rf.color_mask >> i & 1)) return g_fd_why = 2, 0;   // atest_on: the alpha test may drop fragments; lop_on: the logic operation reads the target
+    if (!vs || !fs) return g_fd_why = 21, 0;
+    if (vs->rf.pos_attr < 0) return g_fd_why = 22, 0;
+    if (fs->rf.may_discard) return g_fd_why = 23, 0;
+    if (atest_on()) return g_fd_why = 24, 0;
+    if (lop_on()) return g_fd_why = 25, 0;
+    if (fs->rf.writes_smask) return g_fd_why = 26, 0;
+    if (!(fs->rf.color_mask >> i & 1)) return g_fd_why = 27, 0;
     if (!t || t.sampleCount != 1 || t.textureType == MTLTextureType3D) return g_fd_why = 3, 0;
     if ((S.color.blend_en >> i & 1) || ((S.chmask.mask >> (4 * i)) & 0xf) != 0xf || S.ms.a2c || S.poly.mode != NVN_POLYGON_MODE_FILL) return g_fd_why = 4, 0;
     if (R.rt.depth && ((S.ds.dt && S.ds.df != NVN_DEPTH_FUNC_ALWAYS) || S.ds.st)) return g_fd_why = 5, 0;
