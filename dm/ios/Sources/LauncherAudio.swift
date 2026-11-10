@@ -1,6 +1,6 @@
 // LauncherAudio: the launcher's music and its Play sound (Launcher.swift). iOS only (the Mac settings window does not use it).
-// The music loops while the launcher is up. Play rolls the dice and the music fades out right after them, while the game starts at once: nothing waits for the audio.
-// So the audio outlives the launcher view (one shared instance), and its timers run on their own queue, not the main one, which the game's start may keep busy.
+// The music loops while the launcher is up. Play stops the music at once and rolls the dice, which play out, while the game starts at once: nothing waits for the audio.
+// So the audio outlives the launcher view (one shared instance), and its timer runs on its own queue, not the main one, which the game's start may keep busy.
 // The audio session is left alone on purpose: main.m has already set it up for the game (front_ios_audio_session), and changing its category here would carry over into the game.
 // Files (dm/ios/Resources, bundled by project.yml): LauncherBGM.m4a (the first 1:30 of the track) and LauncherDiceRoll.wav. A missing file just means no sound, never a stuck launcher.
 import AVFoundation
@@ -8,16 +8,12 @@ import AVFoundation
 final class LauncherAudio {
     static let shared = LauncherAudio()
 
-    /// How long the music takes to fade out once the dice sound has finished.
-    static let fadeOutDuration: TimeInterval = 0.5
-    /// Pause between the end of the dice sound and the start of the fade (0 = fade begins the moment the dice stop).
-    static let fadeOutDelay: TimeInterval = 0
     static let musicVolume: Float = 1.0
 
     private var music: AVAudioPlayer?
     private var dice: AVAudioPlayer?
-    private var leaving = false   // Play was pressed: the music is on its way out and must not be restarted
-    private let timers = DispatchQueue(label: "launcher.audio.timers", qos: .userInitiated)   // the fade's timers: not the main queue (the game's start may keep it busy)
+    private var leaving = false   // Play was pressed: the music is stopped and must not be restarted
+    private let timers = DispatchQueue(label: "launcher.audio.timers", qos: .userInitiated)   // the dice's release timer: not the main queue (the game's start may keep it busy)
 
     private func player(_ name: String, _ ext: String) -> AVAudioPlayer? {
         guard let url = Bundle.main.url(forResource: name, withExtension: ext) else {
@@ -49,20 +45,16 @@ final class LauncherAudio {
     func pauseMusic() { music?.pause() }
     func resumeMusic() { if !leaving, music?.isPlaying == false { music?.play() } }
 
-    /// Play was pressed: roll the dice, then fade the music out right after them. Returns at once; the caller starts the game without waiting.
-    func rollThenFadeOut() {
+    /// Play was pressed: stop the music at once and let the dice sound play out. Returns at once; the caller starts the game without waiting.
+    func rollAndStopMusic() {
         guard !leaving else { return }
         leaving = true
+        music?.stop()
+        music = nil
         let roll = player("LauncherDiceRoll", "wav")
         roll?.play()
         dice = roll
-        let fadeStart = (roll?.duration ?? 0) + Self.fadeOutDelay
-        timers.asyncAfter(deadline: .now() + fadeStart) { [self] in
-            music?.setVolume(0, fadeDuration: Self.fadeOutDuration)
-        }
-        timers.asyncAfter(deadline: .now() + fadeStart + Self.fadeOutDuration + 0.05) { [self] in
-            music?.stop()
-            music = nil
+        timers.asyncAfter(deadline: .now() + (roll?.duration ?? 0) + 0.05) { [self] in
             dice = nil
         }
     }

@@ -283,11 +283,11 @@ private struct LauncherView: View {
         if #available(iOS 26.0, *) { button.buttonStyle(.glassProminent) } else { button.buttonStyle(.borderedProminent) }
     }
 
-    // Play: the dice sound starts and the music fades out after it, while the game starts at once (the audio does not hold it up)
+    // Play: the music stops and the dice sound plays out, while the game starts at once (the audio does not hold it up)
     private func pressPlay() {
         guard !starting else { return }
         starting = true
-        audio.rollThenFadeOut()
+        audio.rollAndStopMusic()
         play()
     }
 
