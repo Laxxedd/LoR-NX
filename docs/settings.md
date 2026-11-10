@@ -5,7 +5,7 @@ The screen before the game starts shows the settings the game supports. A settin
 - [Tested defaults](#tested-defaults)
 - [Game](#game): [Frame rate](#frame-rate), [Render scale](#render-scale), [Console mode](#console-mode), [Upscaling](#upscaling), [ASTCENC Transcode Quality](#astcenc-transcode-quality), [Game language](#game-language), [Frame-rate counter](#frame-rate-counter)
 - [Controls](#controls): [Touchscreen Mode](#touchscreen-mode), [Pointer Mode](#pointer-mode), [Cursor sensitivity](#cursor-sensitivity), [Touch feedback](#touch-feedback), [Hold to confirm + button](#hold-to-confirm--button), [Dedicated B button](#dedicated-b-button)
-- [Performance](#performance): [Frame buffering](#frame-buffering), [Metal 4 pipelines](#metal-4-pipelines), [Pipeline prebuild](#pipeline-prebuild), [Encode thread](#encode-thread), [Hold frames when late](#hold-frames-when-late), [Performance HUD](#performance-hud), [Reset to tested defaults](#reset-to-tested-defaults)
+- [Performance](#performance): [Frame buffering](#frame-buffering), [Metal 4 pipelines](#metal-4-pipelines), [Pipeline prebuild](#pipeline-prebuild), [Encode thread](#encode-thread), [Disable MSAA](#disable-msaa), [Tile-based pass optimizations](#tile-based-pass-optimizations), [Defer uniform updates](#defer-uniform-updates), [Keep passes open for depth-stencil clears](#keep-passes-open-for-depth-stencil-clears), [Skip redundant resolve copies](#skip-redundant-resolve-copies), [Skip redundant depth-stencil clears](#skip-redundant-depth-stencil-clears), [Hold frames when late](#hold-frames-when-late), [Performance HUD](#performance-hud), [Reset to tested defaults](#reset-to-tested-defaults)
 - [Memory](#memory): [Extend Memory Usage](#extend-memory-usage), [Reallocate Minimum](#reallocate-minimum)
 - [The Mac settings window](#the-mac-settings-window): [Display mode](#display-mode)
 - [TV](#tv)
@@ -176,6 +176,38 @@ The app turns the game's graphics commands into Metal commands on a thread of it
 
 - **When to change it:** leave it on unless a game misbehaves with it; turning it off is a diagnostic step.
 
+### Disable MSAA
+
+Renders the game's multisampled targets with one sample per pixel. Library of Ruina's High texture quality draws its 1080p RGBA16F scene at 2x MSAA and loads and stores it in three passes, which costs several GPU milliseconds on an A15.
+
+- **When to change it:** turn it on when High texture quality drops below 60 fps.
+- **Cost:** rougher edges. Off by default.
+
+### Tile-based pass optimizations
+
+Merges render passes and skips loading and storing images the GPU never reads, so less data travels between the tile memory and the main memory each frame. Off by default, because the game's bindless textures can defeat the check that decides which images are read. The four settings below only show while this one is on.
+
+- **When to change it:** turn it on to try to save GPU time; turn it off if the picture glitches.
+- **Cost:** may cause visual glitches, and lowers the frame rate when **Defer uniform updates** is off.
+
+### Defer uniform updates
+
+Keeps a render pass open across the game's shader constant updates and applies them when the pass ends, instead of ending the pass at each one. Without it, Library of Ruina breaks about 420 passes a frame under **Tile-based pass optimizations**, which costs more than it saves. On by default.
+
+### Keep passes open for depth-stencil clears
+
+Keeps a render pass open when the game detours to clear a depth-stencil buffer for its mask passes, drawing the clear inside the pass and delaying the clears of other depth-only targets, instead of storing and loading the scene's colour image each time. Off by default.
+
+- **Cost:** if the HP and stagger rings or UI masks draw wrongly, turn it off.
+
+### Skip redundant resolve copies
+
+Skips a whole-image copy of the scene when the next operation on its destination is a copy of the same source over all of it and nothing can read the destination in between. High texture quality copies its scene nine times a frame and reads the result twice. Most useful with **Disable MSAA**, which turns those resolves into plain copies. Off by default.
+
+### Skip redundant depth-stencil clears
+
+Drops a waiting depth or stencil clear when a later full clear of the same image comes before any read. Off by default.
+
 ### Hold frames when late
 
 For games whose frame rate the app controls ([Frame rate](#frame-rate)). With 60 fps chosen, each frame is meant to stay on screen for one refresh. When a frame comes late, the app can either slow the game down to 30 fps for a while, or keep 60 and show late frames as they come.
@@ -261,6 +293,12 @@ A line like `DM_PRESENT_SNAP=0` in `Documents/env.txt` (in the Files app, under 
 | Metal 4 pipelines | `DM_PSO_MTL4` | `1`, `0` |
 | Pipeline prebuild | `DM_PSO_PREBUILD` | `1`, `0` |
 | Encode thread | `DM_NVN_ENC_THREAD` | `1`, `0` |
+| Disable MSAA | `DM_NVN_MSAA_CAP` | `1`, `0` |
+| Tile-based pass optimizations | `DM_NVN_TBDR` | `1`, `0` |
+| Defer uniform updates | `DM_NVN_UB_DEFER` | `1`, `auto` |
+| Keep passes open for depth-stencil clears | `DM_NVN_DS_INPASS` | `1`, `0` |
+| Skip redundant resolve copies | `DM_NVN_RESOLVE_ELIDE` | `1`, `0` |
+| Skip redundant depth-stencil clears | `DM_NVN_LC_ELIDE` | `1`, `0` |
 | Hold frames when late | `DM_FPS_HOLD` | `on`, `off` |
 | Performance HUD | `DM_METAL_HUD` | `1`, `0` |
 | Extend Memory Usage | `DM_RAM_EXTEND` | `1`, `0` |
