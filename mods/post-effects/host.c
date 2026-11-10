@@ -2,14 +2,13 @@
 // The game has five: the v1 camera stack (UnityEngine.PostProcessing.PostProcessingBehaviour, BloomModel), the v2 stack (UnityEngine.Rendering.PostProcessing.PostProcessLayer, Bloom settings), the KriptoFX
 // effects Bloom_RFX4 and RFX4_DistortionAndBloom, and CameraFilterPack_Blur_Bloom. The shaders of all of them are in the Switch build, so what the Switch build leaves out is data (which components its cameras carry, their settings).
 //   bloom_pre     PostProcessingBehaviour.OnPreCull, before mov x19,x0 (x0 = the behaviour): profile = *(this+0x18), bloom model = *(profile+0x58); a disabled model gets m_Enabled = 1 and the v1 settings below,
-//                 an enabled one at intensity <= 0 gets the intensity only
+//                 an enabled one gets them too while DM_POSTFX_V1_FORCE is 1 (the default; the game's own values, intensity 0.25 and threshold 1.0, bloom next to nothing on a camera that is not HDR), else only an intensity <= 0 is replaced;
+//                 the first hit of every behaviour is logged with the model's values before the change
 //   bloom2_force  Bloom.IsEnabledAndSupported, at its entry (x0 = the Bloom settings blended for this camera): when `enabled` is false or intensity <= 0, enabled = true and the v2 settings below are set
-//   story_filter  OptionDataModel.GetStoryFilterOn, at its entry (x0 = the options): storyFilterOn (+0x40) is set to 1. CamFilterController.SetFilter, which every story and battle filter goes through (bloom, rain,
-//                 blood, shake ...), returns at once unless that value is 1, and a save has it 0 unless the Story Filter dropdown of the options was set
 //   probe         the entry of the other bloom sources (param: 1 v1 OnEnable, 3 v2 layer OnEnable, 4 v2 layer OnPreCull, 5 Bloom_RFX4.OnRenderImage, 6 RFX4_DistortionAndBloom.LateUpdate,
 //                 7 CameraFilterPack_Blur_Bloom.OnRenderImage, 8 UIController.SetBloomeIntensity, 9 Bloom_RFX4.OnEnable): logs the first hit with the object's bloom settings, then hit 10, 100, 1000 ...
-// Documents/env.txt can change the values: v1 DM_POSTFX_BLOOM_INTENSITY (0.5), _THRESHOLD (1.1), _KNEE (0.5), _RADIUS (4.0), _ANTIFLICKER (0); v2 DM_POSTFX_V2_INTENSITY (1.0), _THRESHOLD (1.0), _KNEE (0.5),
-//   _DIFFUSION (7.0), _CLAMP (65472.0); DM_POSTFX_V1=0 / DM_POSTFX_V2=0 turn one of the two forces off, DM_POSTFX_STORYFILTER=0 the story filter force.
+// Documents/env.txt can change the values: v1 DM_POSTFX_BLOOM_INTENSITY (0.8), _THRESHOLD (0.6), _KNEE (0.5), _RADIUS (5.0), _ANTIFLICKER (0), DM_POSTFX_V1_FORCE (1); v2 DM_POSTFX_V2_INTENSITY (1.0), _THRESHOLD (1.0), _KNEE (0.5),
+//   _DIFFUSION (7.0), _CLAMP (65472.0); DM_POSTFX_V1=0 / DM_POSTFX_V2=0 turn one of the two forces off.
 // Off by default: DM_MOD_POSTEFFECTS=1 turns the callbacks on (the launcher's Mods > Post Effects switch, or env.txt). The gates are always in the code and pass through while it is off.
 #include "dm.h"
 #include "hle_mods_gen.h"
@@ -34,12 +33,11 @@
 #define P_BOOL 0x11
 
 #define F_UICONTROLLER_PPBLOOM 0x1E0
-#define F_OPTION_STORYFILTER 0x40
 
-static float s_v1_intensity = 0.5f, s_v1_threshold = 1.1f, s_v1_knee = 0.5f, s_v1_radius = 4.0f;
+static float s_v1_intensity = 0.8f, s_v1_threshold = 0.6f, s_v1_knee = 0.5f, s_v1_radius = 5.0f;
 static uint8_t s_v1_antiflicker;
 static float s_v2_intensity = 1.0f, s_v2_threshold = 1.0f, s_v2_knee = 0.5f, s_v2_diffusion = 7.0f, s_v2_clamp = 65472.0f;
-static int s_v1_on = 1, s_v2_on = 1, s_storyfilter_on = 1;
+static int s_v1_on = 1, s_v2_on = 1, s_v1_force = 1;
 
 static float env_float(const char *name, float def) {
     const char *v = getenv(name);
@@ -66,10 +64,10 @@ static int mod_enabled(void) {
         s_v2_clamp = env_float("DM_POSTFX_V2_CLAMP", s_v2_clamp);
         s_v1_on = env_float("DM_POSTFX_V1", 1) != 0;
         s_v2_on = env_float("DM_POSTFX_V2", 1) != 0;
-        s_storyfilter_on = env_float("DM_POSTFX_STORYFILTER", 1) != 0;
-        LOG("[mod post-effects] %s (DM_MOD_POSTEFFECTS=%s) v1 %s (intensity %.2f threshold %.2f knee %.2f radius %.2f) v2 %s (intensity %.2f threshold %.2f knee %.2f diffusion %.1f clamp %.0f) story filter force %s",
-            on ? "on" : "off", v ? v : "unset", s_v1_on ? "on" : "off", s_v1_intensity, s_v1_threshold, s_v1_knee, s_v1_radius,
-            s_v2_on ? "on" : "off", s_v2_intensity, s_v2_threshold, s_v2_knee, s_v2_diffusion, s_v2_clamp, s_storyfilter_on ? "on" : "off");
+        s_v1_force = env_float("DM_POSTFX_V1_FORCE", 1) != 0;
+        LOG("[mod post-effects] %s (DM_MOD_POSTEFFECTS=%s) v1 %s%s (intensity %.2f threshold %.2f knee %.2f radius %.2f) v2 %s (intensity %.2f threshold %.2f knee %.2f diffusion %.1f clamp %.0f)",
+            on ? "on" : "off", v ? v : "unset", s_v1_on ? "on" : "off", s_v1_force ? " forced" : "", s_v1_intensity, s_v1_threshold, s_v1_knee, s_v1_radius,
+            s_v2_on ? "on" : "off", s_v2_intensity, s_v2_threshold, s_v2_knee, s_v2_diffusion, s_v2_clamp);
     }
     return on;
 }
@@ -94,14 +92,24 @@ static void on_bloom_pre(uint64_t *r, int p) {
     if (!profile) return;
     uint8_t *bloom = (uint8_t *)ptr(profile, F_PROFILE_BLOOM);
     static int hits;
+    static const uint8_t *seen[64];
+    static int nseen;
     int log_it = mod_log_hit(&hits);
+    int is_new = 1;
+    for (int i = 0; i < nseen; i++)
+        if (seen[i] == ppb) is_new = 0;
+    if (is_new && nseen < 64) seen[nseen++] = ppb;
+    else is_new = 0;
     if (!bloom) {
-        if (log_it) LOG("[mod post-effects] v1 OnPreCull #%d: profile %p has no bloom model", hits, (const void *)profile);
+        if (log_it || is_new) LOG("[mod post-effects] v1 OnPreCull #%d: behaviour %p profile %p has no bloom model", hits, (const void *)ppb, (const void *)profile);
         return;
     }
     uint8_t was_on = bloom[F_MODEL_ENABLED];
     float was_i = f32(bloom, F_V1_INTENSITY);
-    if (!was_on) {
+    if (is_new)
+        LOG("[mod post-effects] v1 behaviour #%d first seen at OnPreCull #%d: %p profile %p bloom model %p enabled %d intensity %.3f threshold %.3f knee %.3f radius %.3f antiflicker %d",
+            nseen, hits, (const void *)ppb, (const void *)profile, (void *)bloom, was_on, was_i, f32(bloom, F_V1_THRESHOLD), f32(bloom, F_V1_KNEE), f32(bloom, F_V1_RADIUS), bloom[F_V1_ANTIFLICKER]);
+    if (!was_on || s_v1_force) {
         *(float *)(bloom + F_V1_INTENSITY) = s_v1_intensity;
         *(float *)(bloom + F_V1_THRESHOLD) = s_v1_threshold;
         *(float *)(bloom + F_V1_KNEE) = s_v1_knee;
@@ -147,19 +155,6 @@ static void on_bloom2_force(uint64_t *r, int p) {
     if (log_it)
         LOG("[mod post-effects] v2 Bloom.IsEnabledAndSupported #%d: settings %p enabled %d intensity %.3f -> enabled %d intensity %.3f",
             hits, (void *)bloom, was_on, was_i, en[P_BOOL], f32(ptr(bloom, F_V2_INTENSITY), P_FLOAT));
-}
-
-static void on_story_filter(uint64_t *r, int p) {
-    (void)p;
-    if (!mod_enabled() || !s_storyfilter_on) return;
-    uint8_t *opt = (uint8_t *)(uintptr_t)r[0];
-    if (!opt) return;
-    int32_t *flag = (int32_t *)(opt + F_OPTION_STORYFILTER);
-    static int hits;
-    int log_it = mod_log_hit(&hits);
-    int32_t was = *flag;
-    if (was != 1) *flag = 1;
-    if (log_it) LOG("[mod post-effects] OptionDataModel.GetStoryFilterOn #%d: options %p storyFilterOn %d -> %d", hits, (void *)opt, was, *flag);
 }
 
 static void on_probe(uint64_t *r, int p) {
@@ -210,7 +205,6 @@ static void on_probe(uint64_t *r, int p) {
 __attribute__((constructor)) static void mod_post_effects_attach(void) {
     gate_obs_set(MODGATE_POST_EFFECTS_BLOOM_PRE, on_bloom_pre);
     gate_obs_set(MODGATE_POST_EFFECTS_BLOOM2_FORCE, on_bloom2_force);
-    gate_obs_set(MODGATE_POST_EFFECTS_STORY_FILTER, on_story_filter);
     gate_obs_set(MODGATE_POST_EFFECTS_PROBE, on_probe);
     LOG("[mod post-effects] callbacks attached");
 }
