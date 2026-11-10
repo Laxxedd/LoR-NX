@@ -2,13 +2,13 @@
 // The game has five: the v1 camera stack (UnityEngine.PostProcessing.PostProcessingBehaviour, BloomModel), the v2 stack (UnityEngine.Rendering.PostProcessing.PostProcessLayer, Bloom settings), the KriptoFX
 // effects Bloom_RFX4 and RFX4_DistortionAndBloom, and CameraFilterPack_Blur_Bloom. The shaders of all of them are in the Switch build, so what the Switch build leaves out is data (which components its cameras carry, their settings).
 //   bloom_pre     PostProcessingBehaviour.OnPreCull, before mov x19,x0 (x0 = the behaviour): profile = *(this+0x18), bloom model = *(profile+0x58); a disabled model gets m_Enabled = 1 and the v1 settings below,
-//                 an enabled one gets them too while DM_POSTFX_V1_FORCE is 1 (the default; the game's own values, intensity 0.25 and threshold 1.0, bloom next to nothing on a camera that is not HDR), else only an intensity <= 0 is replaced;
+//                 an enabled one keeps the game's own values (the defaults below are the game's: intensity 0.25, threshold 1.0, knee 0.5, radius 7.0) and only an intensity <= 0 is replaced, unless DM_POSTFX_V1_FORCE is 1, which writes the values below into every v1 bloom model;
 //                 the first hit of every behaviour is logged with the model's values before the change, with its camera and the frame; DM_POSTFX_V1=0 keeps this log and changes nothing
-//   bloom2_force  Bloom.IsEnabledAndSupported, at its entry (x0 = the Bloom settings blended for this camera): when `enabled` is false or intensity <= 0, enabled = true and the v2 settings below are set
+//   bloom2_force  Bloom.IsEnabledAndSupported, at its entry (x0 = the Bloom settings blended for this camera): with DM_POSTFX_V2=1 (off by default), when `enabled` is false or intensity <= 0, enabled = true and the v2 settings below are set
 //   story_post    CamFilterController.SetFilter, the ldp just before its only return epilogue (x19 = the controller): the story camera's v1 stack (the controller's postProcessor, +0x98) is switched on when the call left it off.
 //                 The game only switches it on for the "Paper" filter, so the stories that do not use it render without the v1 bloom (the 60% of stories without bloom); DM_POSTFX_STORY=0 turns this off
 //   combat_keep   BattleCamManager.ResetCamSetting, the `mov x2, xzr` before each of its five `bl Behaviour.set_enabled(false)` calls (param 0-4: _bgCamTransform, _fgCamTransform, _mainCam, _characterCam, _effectCam; w1 = 0 is already set, x0 = the component
-//                 found on that camera): when it is a PostProcessingBehaviour (v1 stack), the camera's bit is set in DM_POSTFX_COMBAT_MASK (default 31, all) and, with DM_POSTFX_V1=0, its bloom model is on (a behaviour with nothing to draw only costs a full-screen pass), w1 becomes 1, so the game's reset leaves the combat bloom behaviours enabled
+//                 found on that camera): when it is a PostProcessingBehaviour (v1 stack), the camera's bit is set in DM_POSTFX_COMBAT_MASK (default 25: _bgCamTransform, _characterCam and _effectCam; 31 is all five) and, with DM_POSTFX_V1=0, its bloom model is on (a behaviour with nothing to draw only costs a full-screen pass), w1 becomes 1, so the game's reset leaves the combat bloom behaviours enabled
 //                 and bloom_pre then forces their bloom on; DM_POSTFX_COMBAT=0 turns this off; each behaviour it sees is remembered for combat_post
 //   combat_post   BattleCamManager.ResetCamSetting, the ldp x20,x19 before its return (x19 = the manager): every behaviour combat_keep remembered that is still disabled is switched on, so the combat bloom does not depend on the argument write alone
 //   ui_platform   the `cmp w8, #4` of the five `PlatformManager.PlatformType == NintentoSwitch` checks that keep the menu bloom off (param 0 UIController.CallUIPhase, 1 CallUIPhaseAsynchronous, 2 SetBloomeIntensity, 3 SetBloomThreshold, 4 SetBloomSoftKnee):
@@ -21,8 +21,8 @@
 //                 params 1, 3, 9, 10, 11, 12 and 13 (calls that happen once per scene or filter change) log every hit, with the frame number;
 //                 param 14 logs the first render of each v1 behaviour, then every power of ten ... (is it ever rendered, and through which camera);
 //                 params 1 and 13 also log the caller and a frame pointer backtrace (main+offset) for the first 8 calls on a behaviour that has no camera yet (m_Camera is set by its first OnPreCull)
-// Documents/env.txt can change the values: v1 DM_POSTFX_BLOOM_INTENSITY (0.8), _THRESHOLD (0.6), _KNEE (0.5), _RADIUS (5.0), _ANTIFLICKER (0), DM_POSTFX_V1_FORCE (1); v2 DM_POSTFX_V2_INTENSITY (1.0), _THRESHOLD (1.0), _KNEE (0.5),
-//   _DIFFUSION (7.0), _CLAMP (65472.0); DM_POSTFX_V1=0 / DM_POSTFX_V2=0 turn one of the two forces off, DM_POSTFX_STORY (1), DM_POSTFX_COMBAT (1), DM_POSTFX_COMBAT_MASK (31), DM_POSTFX_UI (1).
+// Documents/env.txt can change the values: v1 DM_POSTFX_BLOOM_INTENSITY (0.25), _THRESHOLD (1.0), _KNEE (0.5), _RADIUS (7.0), _ANTIFLICKER (0), DM_POSTFX_V1_FORCE (0); v2 DM_POSTFX_V2_INTENSITY (1.0), _THRESHOLD (1.0), _KNEE (0.5),
+//   _DIFFUSION (7.0), _CLAMP (65472.0); DM_POSTFX_V1=0 turns the v1 force off, DM_POSTFX_V2=1 turns the v2 force on, DM_POSTFX_STORY (1), DM_POSTFX_COMBAT (1), DM_POSTFX_COMBAT_MASK (25), DM_POSTFX_UI (1).
 // Off by default: DM_MOD_POSTEFFECTS=1 turns the callbacks on (the launcher's Mods > Post Effects switch, or env.txt). The gates are always in the code and pass through while it is off.
 #include "dm.h"
 #include "hle_mods_gen.h"
@@ -79,10 +79,10 @@ void dm_mod_gate_run(uint64_t *regs, int param, void (*fn)(uint64_t *, int));
 #define F_STRING_LENGTH 0x10
 #define F_STRING_CHARS 0x14
 
-static float s_v1_intensity = 0.8f, s_v1_threshold = 0.6f, s_v1_knee = 0.5f, s_v1_radius = 5.0f;
+static float s_v1_intensity = 0.25f, s_v1_threshold = 1.0f, s_v1_knee = 0.5f, s_v1_radius = 7.0f;
 static uint8_t s_v1_antiflicker;
 static float s_v2_intensity = 1.0f, s_v2_threshold = 1.0f, s_v2_knee = 0.5f, s_v2_diffusion = 7.0f, s_v2_clamp = 65472.0f;
-static int s_v1_on = 1, s_v2_on = 1, s_v1_force = 1, s_story_on = 1, s_combat_on = 1, s_combat_mask = 31, s_ui_on = 1;
+static int s_v1_on = 1, s_v2_on = 0, s_v1_force = 0, s_story_on = 1, s_combat_on = 1, s_combat_mask = 25, s_ui_on = 1;
 
 static float env_float(const char *name, float def) {
     const char *v = getenv(name);
@@ -108,11 +108,11 @@ static int mod_enabled(void) {
         s_v2_diffusion = env_float("DM_POSTFX_V2_DIFFUSION", s_v2_diffusion);
         s_v2_clamp = env_float("DM_POSTFX_V2_CLAMP", s_v2_clamp);
         s_v1_on = env_float("DM_POSTFX_V1", 1) != 0;
-        s_v2_on = env_float("DM_POSTFX_V2", 1) != 0;
-        s_v1_force = env_float("DM_POSTFX_V1_FORCE", 1) != 0;
+        s_v2_on = env_float("DM_POSTFX_V2", 0) != 0;
+        s_v1_force = env_float("DM_POSTFX_V1_FORCE", 0) != 0;
         s_story_on = env_float("DM_POSTFX_STORY", 1) != 0;
         s_combat_on = env_float("DM_POSTFX_COMBAT", 1) != 0;
-        s_combat_mask = (int)env_float("DM_POSTFX_COMBAT_MASK", 31);
+        s_combat_mask = (int)env_float("DM_POSTFX_COMBAT_MASK", 25);
         s_ui_on = env_float("DM_POSTFX_UI", 1) != 0;
         LOG("[mod post-effects] %s (DM_MOD_POSTEFFECTS=%s) v1 %s%s (intensity %.2f threshold %.2f knee %.2f radius %.2f) v2 %s (intensity %.2f threshold %.2f knee %.2f diffusion %.1f clamp %.0f) story %s combat %s (mask %d) ui %s",
             on ? "on" : "off", v ? v : "unset", s_v1_on ? "on" : "off", s_v1_force ? " forced" : "", s_v1_intensity, s_v1_threshold, s_v1_knee, s_v1_radius,
