@@ -8,7 +8,7 @@
 //   story_post    CamFilterController.SetFilter, the ldp just before its only return epilogue (x19 = the controller): the story camera's v1 stack (the controller's postProcessor, +0x98) is switched on when the call left it off.
 //                 The game only switches it on for the "Paper" filter, so the stories that do not use it render without the v1 bloom (the 60% of stories without bloom); DM_POSTFX_STORY=0 turns this off
 //   combat_keep   BattleCamManager.ResetCamSetting, the `mov x2, xzr` before each of its five `bl Behaviour.set_enabled(false)` calls (param 0-4: _bgCamTransform, _fgCamTransform, _mainCam, _characterCam, _effectCam; w1 = 0 is already set, x0 = the component
-//                 found on that camera): when it is a PostProcessingBehaviour (v1 stack) and the camera's bit is set in DM_POSTFX_COMBAT_MASK (default 31, all), w1 becomes 1, so the game's reset leaves the combat bloom behaviours enabled
+//                 found on that camera): when it is a PostProcessingBehaviour (v1 stack), the camera's bit is set in DM_POSTFX_COMBAT_MASK (default 31, all) and, with DM_POSTFX_V1=0, its bloom model is on (a behaviour with nothing to draw only costs a full-screen pass), w1 becomes 1, so the game's reset leaves the combat bloom behaviours enabled
 //                 and bloom_pre then forces their bloom on; DM_POSTFX_COMBAT=0 turns this off; each behaviour it sees is remembered for combat_post
 //   combat_post   BattleCamManager.ResetCamSetting, the ldp x20,x19 before its return (x19 = the manager): every behaviour combat_keep remembered that is still disabled is switched on, so the combat bloom does not depend on the argument write alone
 //   probe         the entry of the other bloom sources (param: 1 v1 OnEnable, 3 v2 layer OnEnable, 4 v2 layer OnPreCull, 5 Bloom_RFX4.OnRenderImage, 6 RFX4_DistortionAndBloom.LateUpdate,
@@ -191,12 +191,19 @@ static void on_bloom_pre(uint64_t *r, int p) {
 
 static uint8_t *s_combat_ppb[5];
 
+static int bloom_model_on(const uint8_t *ppb) {
+    const uint8_t *profile = ptr(ppb, F_PPB_PROFILE);
+    const uint8_t *bloom = profile ? ptr(profile, F_PROFILE_BLOOM) : NULL;
+    return !bloom || bloom[F_MODEL_ENABLED];
+}
+
 static void on_combat_keep(uint64_t *r, int p) {
     if (!mod_enabled() || !s_combat_on) return;
     const uint8_t *o = (const uint8_t *)(uintptr_t)r[0];
     const uint8_t *klass = o ? ptr(o, 0) : NULL;
     const char *name = klass ? *(const char *const *)(klass + F_CLASS_NAME) : NULL;
     if (!name || strcmp(name, "PostProcessingBehaviour") || !(s_combat_mask >> p & 1)) return;
+    if (!s_v1_on && !bloom_model_on(o)) return;
     if (p >= 0 && p < 5) s_combat_ppb[p] = (uint8_t *)(uintptr_t)o;
     r[1] = 1;
     static int hits;
