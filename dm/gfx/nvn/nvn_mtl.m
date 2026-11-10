@@ -9450,17 +9450,29 @@ static int lc_sdx_redundant(const lc_group *g, int plane) {
     }
     return 0;
 }
-// Land every waiting clear, oldest first, each group in a pass of its own (rp_flush's way)
+static void lc_dropped(const lc_group *g) {
+    g_lc_dropped++;
+    if (g_lc_dropped == 1) MLOG("lazy clear pass elided: serial=%llu depth/stencil clear is superseded before any read (first case pass %llu)", (unsigned long long)(g->rt.depth ? g->rt.depth->serial : 0), (unsigned long long)g_stat_pass);
+}
+static int lc_flags(const lc_group *g) { int f = g->clear_d || g->clear_s; for (int i = 0; i < 8; i++) f |= g->clear_c[i]; return f; }
+// Land every waiting clear, oldest first, each group in a pass of its own (rp_flush's way); an open pass stays open when every waiting clear is superseded before any read
 static void lc_land_(void) {
     if (!g_nlc) return;
+    if (g_enc && !g_fz.active) {
+        int live = 0;
+        for (int gi = 0; gi < g_nlc; gi++) { lc_group *g = &g_lc[gi]; int was = lc_flags(g);
+            if (g->clear_d && lc_sdx_redundant(g, 1)) g->clear_d = 0;
+            if (g->clear_s && lc_sdx_redundant(g, 2)) g->clear_s = 0;
+            if (lc_flags(g)) live = 1; else if (was) lc_dropped(g); }
+        if (!live) { g_nlc = 0; return; }
+    }
     if (g_enc) rp_end();
     int n = g_nlc; g_nlc = 0;
     typeof(R) save = R;
-    for (int gi = 0; gi < n; gi++) { lc_group *g = &g_lc[gi]; int was = g->clear_d || g->clear_s; for (int i = 0; i < 8; i++) was |= g->clear_c[i];
+    for (int gi = 0; gi < n; gi++) { lc_group *g = &g_lc[gi]; int was = lc_flags(g);
         if (g->clear_d && lc_sdx_redundant(g, 1)) g->clear_d = 0;
         if (g->clear_s && lc_sdx_redundant(g, 2)) g->clear_s = 0;
-        int any = g->clear_d || g->clear_s; for (int i = 0; i < 8; i++) any |= g->clear_c[i];
-        if (!any) { if (was) { g_lc_dropped++; if (g_lc_dropped == 1) MLOG("lazy clear pass elided: serial=%llu depth/stencil clear is superseded before any read (first case pass %llu)", (unsigned long long)(g->rt.depth ? g->rt.depth->serial : 0), (unsigned long long)g_stat_pass); } continue; }
+        if (!lc_flags(g)) { if (was) lc_dropped(g); continue; }
         if (!g_cb) continue;
         R.rt = g->rt; R.has_rt = 1; memcpy(R.clear_c, g->clear_c, sizeof R.clear_c); memcpy(R.cc, g->cc, sizeof R.cc);
         R.clear_d = g->clear_d; R.clear_s = g->clear_s; R.cd = g->cd; R.cs = g->cs;
@@ -10498,16 +10510,18 @@ static int rce_dead(const p_copy_t2t *c) {
     return 1;
 }
 // GPU: texture -> texture (previously mislisted as a no-op, 3 times per frame on the character select page). Same size, not mirrored, same format -> blit layer by layer; the other semantics (scaling with filtering, mirroring, format change) cannot be expressed by blit: report a failure, to be implemented
+static int rce_elides(const p_copy_t2t *c) {
+    if (!(c->flags & DM_COPY_RESOLVE) || !c->src || !c->dst || !rce_on()) return 0;
+    id<MTLTexture> s0 = tex_mtl(c->src), d0 = tex_mtl(c->dst);
+    return s0 && d0 && s0.sampleCount == d0.sampleCount && s0.pixelFormat == d0.pixelFormat && s0.width == d0.width && s0.height == d0.height && rce_dead(c);
+}
 static void copy_t2t(const p_copy_t2t *c) {
     if (c->src) xv_check(c->src->serial, c->has_sv && c->sv.set_levels ? c->sv.base_level : 0, c->has_sv && c->sv.set_layers ? c->sv.min_layer : 0, "texture copy source");
-    if ((c->flags & DM_COPY_RESOLVE) && c->src && c->dst && rce_on()) {
-        id<MTLTexture> s0 = tex_mtl(c->src), d0 = tex_mtl(c->dst);
-        if (s0 && d0 && s0.sampleCount == d0.sampleCount && s0.pixelFormat == d0.pixelFormat && s0.width == d0.width && s0.height == d0.height && rce_dead(c)) {
-            zskip_del(c->dst->serial);
-            if (!g_rce_skipped++) MLOG("resolve copy elision: first case pass %llu (%lux%lu, serial %llu to %llu)", g_stat_pass, (unsigned long)s0.width, (unsigned long)s0.height, (unsigned long long)c->src->serial, (unsigned long long)c->dst->serial);
-            PD("t %llu resolve copy skipped: ser=%llu is overwritten before anything reads it", g_stat_pass, (unsigned long long)c->dst->serial);
-            return;
-        }
+    if (rce_elides(c)) {
+        zskip_del(c->dst->serial);
+        if (!g_rce_skipped++) { id<MTLTexture> s0 = tex_mtl(c->src); MLOG("resolve copy elision: first case pass %llu (%lux%lu, serial %llu to %llu)", g_stat_pass, (unsigned long)s0.width, (unsigned long)s0.height, (unsigned long long)c->src->serial, (unsigned long long)c->dst->serial); }
+        PD("t %llu resolve copy skipped: ser=%llu is overwritten before anything reads it", g_stat_pass, (unsigned long long)c->dst->serial);
+        return;
     }
     rp_flush();   // Land the pending pure-clear render pass first (zero-source candidates only enter the set when the render pass ends); the blit() below would end the render pass anyway
     if (c->dst) zskip_del(c->dst->serial);
@@ -11071,7 +11085,7 @@ void mtl_exec(const uint8_t *p) {
         if (g_ipc_n && ipc_fire(p)) { p += h.size; continue; }
         if (g_hoist_n && hoist_take(p)) { if (g_fz.active && p == g_fz.rt2_op) { g_fz.phase = 2; g_rt_merged = 0; PD("F %llu merged pass enters the later pass's draws", g_stat_pass); } p += h.size; continue; }   // A pure-clear render pass already executed early / the start of a later pass already merged in   // Entering the later pass: the same-target continuation of the earlier pass ends here; the later pass reading the earlier pass's attachment is proven to be same-pixel by fz_p2_draw, and is no longer split by the continuation rule
         const void *a = p + 8;
-        if (g_nlc && !lc_keeps(h.op) && !(h.op == OP_END && g_ret_n)) lc_land();   // see lc_keeps (a sub-list's end returns to its caller)
+        if (g_nlc && !lc_keeps(h.op) && !(h.op == OP_END && g_ret_n) && !(h.op == OP_COPY_T2T && rce_elides((const p_copy_t2t *)a))) lc_land();   // see lc_keeps (a sub-list's end returns to its caller; an elided resolve copy touches no texture)
         switch (h.op) {
             case OP_END: g_exec_cur = NULL;
                 if (!g_ret_n && !g_nrest) g_ipc_n = 0;
