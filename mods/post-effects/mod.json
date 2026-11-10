@@ -1,7 +1,7 @@
 {
   "id": "post-effects",
   "title": "Post Effects (Library of Ruina)",
-  "description": "Turns bloom back on in the Switch version. Host callbacks force the bloom of the game's v1 camera stack (UnityEngine.PostProcessing, OnPreCull) and of the v2 stack (UnityEngine.Rendering.PostProcessing, Bloom.IsEnabledAndSupported) on when they are off, and log which of the game's bloom sources (v1, v2, RFX4_Bloom, RFX4_DistortionAndBloom, CameraFilterPack_Blur_Bloom) run and with what settings.",
+  "description": "Turns bloom back on in the Switch version. Host callbacks force the bloom of the game's v1 camera stack (UnityEngine.PostProcessing, OnPreCull) and of the v2 stack (UnityEngine.Rendering.PostProcessing, Bloom.IsEnabledAndSupported) on when they are off, force the Story Filter option (OptionDataModel.GetStoryFilterOn, which gates every CamFilterController.SetFilter effect) on, and log which of the game's bloom sources (v1, v2, RFX4_Bloom, RFX4_DistortionAndBloom, CameraFilterPack_Blur_Bloom) run and with what settings.",
   "launcher": {
     "env": "DM_MOD_POSTEFFECTS",
     "category": "Quality of Life",
@@ -12,6 +12,7 @@
   "gates": [
     "bloom_pre",
     "bloom2_force",
+    "story_filter",
     "probe"
   ],
   "host": "host.c",
@@ -28,6 +29,12 @@
         "offset": "0x2e81150",
         "word": "a9bf7bfd",
         "reason": "Bloom.IsEnabledAndSupported (v2 stack), function entry: x0 = the blended Bloom settings of the camera's layer"
+      },
+      {
+        "gate": "story_filter",
+        "offset": "0x28abc40",
+        "word": "b9404008",
+        "reason": "OptionDataModel.GetStoryFilterOn, function entry: x0 = the options (storyFilterOn at +0x40); its only caller is CamFilterController.SetFilter (0x2ae247c)"
       },
       {
         "gate": "probe",
