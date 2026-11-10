@@ -215,6 +215,9 @@ private struct LauncherView: View {
                         .font(.title.weight(.bold)).multilineTextAlignment(.center)
                     Text("Version \((info("CFBundleShortVersionString") as? String) ?? "")")
                         .font(.callout).foregroundStyle(.secondary)
+                    if let nx = info("NXVersion") as? String, !nx.isEmpty {
+                        Text("LoR NX v\(nx)").font(.callout).foregroundStyle(.secondary)
+                    }
                     playButton
                 }
                 .padding(16)
