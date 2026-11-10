@@ -1,7 +1,7 @@
 {
   "id": "post-effects",
   "title": "Post Effects (Library of Ruina)",
-  "description": "Turns bloom back on in the Switch version. Host callbacks force the bloom of the game's v1 camera stack (UnityEngine.PostProcessing, OnPreCull) on, and with stronger settings than the game's 0.25 / threshold 1.0, and the bloom of the v2 stack (UnityEngine.Rendering.PostProcessing, Bloom.IsEnabledAndSupported) on when it is off, and, in combat, switch the v1 behaviours back on after BattleCamManager.ResetCamSetting disables them before their first render, and keep the v1 behaviours that BattleCamManager.ResetCamSetting would disable in combat enabled, and log which of the game's bloom sources (v1, v2, RFX4_Bloom, RFX4_DistortionAndBloom, CameraFilterPack_Blur_Bloom) run and with what settings.",
+  "description": "Turns bloom back on in the Switch version. Host callbacks force the bloom of the game's v1 camera stack (UnityEngine.PostProcessing, OnPreCull) on, and with stronger settings than the game's 0.25 / threshold 1.0, and the bloom of the v2 stack (UnityEngine.Rendering.PostProcessing, Bloom.IsEnabledAndSupported) on when it is off, and, in combat, switch the v1 behaviours back on after BattleCamManager.ResetCamSetting disables them before their first render, and keep the v1 behaviours that BattleCamManager.ResetCamSetting would disable in combat enabled, and pass the five Switch platform checks of UIController (CallUIPhase, CallUIPhaseAsynchronous, SetBloomeIntensity, SetBloomThreshold, SetBloomSoftKnee) as another platform so the bloom of the UI's PostProcessVolume runs in the menus and the combat UI as on PC, and log which of the game's bloom sources (v1, v2, RFX4_Bloom, RFX4_DistortionAndBloom, CameraFilterPack_Blur_Bloom) run and with what settings.",
   "launcher": {
     "env": "DM_MOD_POSTEFFECTS",
     "category": "Quality of Life",
@@ -12,6 +12,7 @@
   "gates": [
     "bloom_pre",
     "bloom2_force",
+    "ui_platform",
     "story_post",
     "probe",
     "combat_keep",
@@ -31,6 +32,41 @@
         "offset": "0x2e81150",
         "word": "a9bf7bfd",
         "reason": "Bloom.IsEnabledAndSupported (v2 stack), function entry: x0 = the blended Bloom settings of the camera's layer"
+      },
+      {
+        "gate": "ui_platform",
+        "param": 0,
+        "offset": "0x16fce3c",
+        "word": "7100111f",
+        "reason": "UIController.CallUIPhase, cmp w8,#4 after ldr w8,[x0,#0x34] (PlatformManager.PlatformType == NintentoSwitch): w8 = the platform type (a write to x8 reaches the cmp)"
+      },
+      {
+        "gate": "ui_platform",
+        "param": 1,
+        "offset": "0x16fe478",
+        "word": "7100111f",
+        "reason": "UIController.CallUIPhaseAsynchronous, cmp w8,#4 after ldr w8,[x0,#0x34] (PlatformManager.PlatformType == NintentoSwitch): w8 = the platform type (a write to x8 reaches the cmp)"
+      },
+      {
+        "gate": "ui_platform",
+        "param": 2,
+        "offset": "0x16ff958",
+        "word": "7100111f",
+        "reason": "UIController.SetBloomeIntensity, cmp w8,#4 after ldr w8,[x0,#0x34] (PlatformManager.PlatformType == NintentoSwitch): w8 = the platform type (a write to x8 reaches the cmp)"
+      },
+      {
+        "gate": "ui_platform",
+        "param": 3,
+        "offset": "0x16ffa28",
+        "word": "7100111f",
+        "reason": "UIController.SetBloomThreshold, cmp w8,#4 after ldr w8,[x0,#0x34] (PlatformManager.PlatformType == NintentoSwitch): w8 = the platform type (a write to x8 reaches the cmp)"
+      },
+      {
+        "gate": "ui_platform",
+        "param": 4,
+        "offset": "0x16ffaf8",
+        "word": "7100111f",
+        "reason": "UIController.SetBloomSoftKnee, cmp w8,#4 after ldr w8,[x0,#0x34] (PlatformManager.PlatformType == NintentoSwitch): w8 = the platform type (a write to x8 reaches the cmp)"
       },
       {
         "gate": "story_post",

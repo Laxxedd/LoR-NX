@@ -11,6 +11,9 @@
 //                 found on that camera): when it is a PostProcessingBehaviour (v1 stack), the camera's bit is set in DM_POSTFX_COMBAT_MASK (default 31, all) and, with DM_POSTFX_V1=0, its bloom model is on (a behaviour with nothing to draw only costs a full-screen pass), w1 becomes 1, so the game's reset leaves the combat bloom behaviours enabled
 //                 and bloom_pre then forces their bloom on; DM_POSTFX_COMBAT=0 turns this off; each behaviour it sees is remembered for combat_post
 //   combat_post   BattleCamManager.ResetCamSetting, the ldp x20,x19 before its return (x19 = the manager): every behaviour combat_keep remembered that is still disabled is switched on, so the combat bloom does not depend on the argument write alone
+//   ui_platform   the `cmp w8, #4` of the five `PlatformManager.PlatformType == NintentoSwitch` checks that keep the menu bloom off (param 0 UIController.CallUIPhase, 1 CallUIPhaseAsynchronous, 2 SetBloomeIntensity, 3 SetBloomThreshold, 4 SetBloomSoftKnee):
+//                 w8 = the platform type; a 4 becomes 2 so the game fetches the Bloom of its UI PostProcessVolume (UIController.pp_bloom, never fetched on Switch) and sets its intensity, threshold and soft knee per UI phase as on PC;
+//                 DM_POSTFX_UI=0 turns this off
 //   probe         the entry of the other bloom sources (param: 1 v1 OnEnable, 3 v2 layer OnEnable, 4 v2 layer OnPreCull, 5 Bloom_RFX4.OnRenderImage, 6 RFX4_DistortionAndBloom.LateUpdate,
 //                 7 CameraFilterPack_Blur_Bloom.OnRenderImage, 8 UIController.SetBloomeIntensity, 9 Bloom_RFX4.OnEnable,
 //                 10 CamFilterController.SetFilter, 11 CamFilterController.BloomRoutine, 12 CamFilterController.BloomAndPillarOfLightRoutine,
@@ -19,7 +22,7 @@
 //                 param 14 logs the first render of each v1 behaviour, then every power of ten ... (is it ever rendered, and through which camera);
 //                 params 1 and 13 also log the caller and a frame pointer backtrace (main+offset) for the first 8 calls on a behaviour that has no camera yet (m_Camera is set by its first OnPreCull)
 // Documents/env.txt can change the values: v1 DM_POSTFX_BLOOM_INTENSITY (0.8), _THRESHOLD (0.6), _KNEE (0.5), _RADIUS (5.0), _ANTIFLICKER (0), DM_POSTFX_V1_FORCE (1); v2 DM_POSTFX_V2_INTENSITY (1.0), _THRESHOLD (1.0), _KNEE (0.5),
-//   _DIFFUSION (7.0), _CLAMP (65472.0); DM_POSTFX_V1=0 / DM_POSTFX_V2=0 turn one of the two forces off, DM_POSTFX_STORY (1), DM_POSTFX_COMBAT (1), DM_POSTFX_COMBAT_MASK (31).
+//   _DIFFUSION (7.0), _CLAMP (65472.0); DM_POSTFX_V1=0 / DM_POSTFX_V2=0 turn one of the two forces off, DM_POSTFX_STORY (1), DM_POSTFX_COMBAT (1), DM_POSTFX_COMBAT_MASK (31), DM_POSTFX_UI (1).
 // Off by default: DM_MOD_POSTEFFECTS=1 turns the callbacks on (the launcher's Mods > Post Effects switch, or env.txt). The gates are always in the code and pass through while it is off.
 #include "dm.h"
 #include "hle_mods_gen.h"
@@ -61,7 +64,7 @@ void dm_mod_gate_run(uint64_t *regs, int param, void (*fn)(uint64_t *, int));
 static float s_v1_intensity = 0.8f, s_v1_threshold = 0.6f, s_v1_knee = 0.5f, s_v1_radius = 5.0f;
 static uint8_t s_v1_antiflicker;
 static float s_v2_intensity = 1.0f, s_v2_threshold = 1.0f, s_v2_knee = 0.5f, s_v2_diffusion = 7.0f, s_v2_clamp = 65472.0f;
-static int s_v1_on = 1, s_v2_on = 1, s_v1_force = 1, s_story_on = 1, s_combat_on = 1, s_combat_mask = 31;
+static int s_v1_on = 1, s_v2_on = 1, s_v1_force = 1, s_story_on = 1, s_combat_on = 1, s_combat_mask = 31, s_ui_on = 1;
 
 static float env_float(const char *name, float def) {
     const char *v = getenv(name);
@@ -92,9 +95,10 @@ static int mod_enabled(void) {
         s_story_on = env_float("DM_POSTFX_STORY", 1) != 0;
         s_combat_on = env_float("DM_POSTFX_COMBAT", 1) != 0;
         s_combat_mask = (int)env_float("DM_POSTFX_COMBAT_MASK", 31);
-        LOG("[mod post-effects] %s (DM_MOD_POSTEFFECTS=%s) v1 %s%s (intensity %.2f threshold %.2f knee %.2f radius %.2f) v2 %s (intensity %.2f threshold %.2f knee %.2f diffusion %.1f clamp %.0f) story %s combat %s (mask %d)",
+        s_ui_on = env_float("DM_POSTFX_UI", 1) != 0;
+        LOG("[mod post-effects] %s (DM_MOD_POSTEFFECTS=%s) v1 %s%s (intensity %.2f threshold %.2f knee %.2f radius %.2f) v2 %s (intensity %.2f threshold %.2f knee %.2f diffusion %.1f clamp %.0f) story %s combat %s (mask %d) ui %s",
             on ? "on" : "off", v ? v : "unset", s_v1_on ? "on" : "off", s_v1_force ? " forced" : "", s_v1_intensity, s_v1_threshold, s_v1_knee, s_v1_radius,
-            s_v2_on ? "on" : "off", s_v2_intensity, s_v2_threshold, s_v2_knee, s_v2_diffusion, s_v2_clamp, s_story_on ? "on" : "off", s_combat_on ? "on" : "off", s_combat_mask);
+            s_v2_on ? "on" : "off", s_v2_intensity, s_v2_threshold, s_v2_knee, s_v2_diffusion, s_v2_clamp, s_story_on ? "on" : "off", s_combat_on ? "on" : "off", s_combat_mask, s_ui_on ? "on" : "off");
     }
     return on;
 }
@@ -376,6 +380,15 @@ static void on_combat_post(uint64_t *r, int p) {
     if (mod_enabled() && s_combat_on) dm_mod_gate_run(r, p, combat_post_run);
 }
 
+static void on_ui_platform(uint64_t *r, int p) {
+    if (!mod_enabled() || !s_ui_on) return;
+    if ((uint32_t)r[8] != 4u) return;
+    r[8] = 2;
+    static int hits;
+    if (hits++ < 16)
+        LOG("[mod post-effects] ui: Switch platform check %d passed as Steam, frame %llu", p, (unsigned long long)dm_nvn_frame_count());
+}
+
 __attribute__((constructor)) static void mod_post_effects_attach(void) {
     gate_obs_set(MODGATE_POST_EFFECTS_BLOOM_PRE, on_bloom_pre);
     gate_obs_set(MODGATE_POST_EFFECTS_BLOOM2_FORCE, on_bloom2_force);
@@ -383,5 +396,6 @@ __attribute__((constructor)) static void mod_post_effects_attach(void) {
     gate_obs_set(MODGATE_POST_EFFECTS_STORY_POST, on_story_post);
     gate_obs_set(MODGATE_POST_EFFECTS_COMBAT_KEEP, on_combat_keep);
     gate_obs_set(MODGATE_POST_EFFECTS_COMBAT_POST, on_combat_post);
+    gate_obs_set(MODGATE_POST_EFFECTS_UI_PLATFORM, on_ui_platform);
     LOG("[mod post-effects] callbacks attached");
 }
