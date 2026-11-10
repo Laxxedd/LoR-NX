@@ -5,6 +5,8 @@
 //                 an enabled one gets them too while DM_POSTFX_V1_FORCE is 1 (the default; the game's own values, intensity 0.25 and threshold 1.0, bloom next to nothing on a camera that is not HDR), else only an intensity <= 0 is replaced;
 //                 the first hit of every behaviour is logged with the model's values before the change, with its camera and the frame; DM_POSTFX_V1=0 keeps this log and changes nothing
 //   bloom2_force  Bloom.IsEnabledAndSupported, at its entry (x0 = the Bloom settings blended for this camera): when `enabled` is false or intensity <= 0, enabled = true and the v2 settings below are set
+//   story_post    CamFilterController.SetFilter, the ldp just before its only return epilogue (x19 = the controller): the story camera's v1 stack (the controller's postProcessor, +0x98) is switched on when the call left it off.
+//                 The game only switches it on for the "Paper" filter, so the stories that do not use it render without the v1 bloom (the 60% of stories without bloom); DM_POSTFX_STORY=0 turns this off
 //   probe         the entry of the other bloom sources (param: 1 v1 OnEnable, 3 v2 layer OnEnable, 4 v2 layer OnPreCull, 5 Bloom_RFX4.OnRenderImage, 6 RFX4_DistortionAndBloom.LateUpdate,
 //                 7 CameraFilterPack_Blur_Bloom.OnRenderImage, 8 UIController.SetBloomeIntensity, 9 Bloom_RFX4.OnEnable,
 //                 10 CamFilterController.SetFilter, 11 CamFilterController.BloomRoutine, 12 CamFilterController.BloomAndPillarOfLightRoutine,
@@ -12,10 +14,15 @@
 //                 params 1, 3, 9, 10, 11, 12 and 13 (calls that happen once per scene or filter change) log every hit, with the frame number;
 //                 param 14 logs the first render of each v1 behaviour, then every power of ten ... (is it ever rendered, and through which camera)
 // Documents/env.txt can change the values: v1 DM_POSTFX_BLOOM_INTENSITY (0.8), _THRESHOLD (0.6), _KNEE (0.5), _RADIUS (5.0), _ANTIFLICKER (0), DM_POSTFX_V1_FORCE (1); v2 DM_POSTFX_V2_INTENSITY (1.0), _THRESHOLD (1.0), _KNEE (0.5),
-//   _DIFFUSION (7.0), _CLAMP (65472.0); DM_POSTFX_V1=0 / DM_POSTFX_V2=0 turn one of the two forces off.
+//   _DIFFUSION (7.0), _CLAMP (65472.0); DM_POSTFX_V1=0 / DM_POSTFX_V2=0 turn one of the two forces off, DM_POSTFX_STORY (1).
 // Off by default: DM_MOD_POSTEFFECTS=1 turns the callbacks on (the launcher's Mods > Post Effects switch, or env.txt). The gates are always in the code and pass through while it is off.
 #include "dm.h"
 #include "hle_mods_gen.h"
+
+void dm_mod_gate_run(uint64_t *regs, int param, void (*fn)(uint64_t *, int));
+
+#define K_BEHAVIOUR_GET_ENABLED 0x19ADF90u
+#define K_BEHAVIOUR_SET_ENABLED 0x19ADFE0u
 
 #define F_PPB_PROFILE 0x18
 #define F_PPB_CAMERA 0x58
@@ -47,7 +54,7 @@
 static float s_v1_intensity = 0.8f, s_v1_threshold = 0.6f, s_v1_knee = 0.5f, s_v1_radius = 5.0f;
 static uint8_t s_v1_antiflicker;
 static float s_v2_intensity = 1.0f, s_v2_threshold = 1.0f, s_v2_knee = 0.5f, s_v2_diffusion = 7.0f, s_v2_clamp = 65472.0f;
-static int s_v1_on = 1, s_v2_on = 1, s_v1_force = 1;
+static int s_v1_on = 1, s_v2_on = 1, s_v1_force = 1, s_story_on = 1;
 
 static float env_float(const char *name, float def) {
     const char *v = getenv(name);
@@ -75,9 +82,10 @@ static int mod_enabled(void) {
         s_v1_on = env_float("DM_POSTFX_V1", 1) != 0;
         s_v2_on = env_float("DM_POSTFX_V2", 1) != 0;
         s_v1_force = env_float("DM_POSTFX_V1_FORCE", 1) != 0;
-        LOG("[mod post-effects] %s (DM_MOD_POSTEFFECTS=%s) v1 %s%s (intensity %.2f threshold %.2f knee %.2f radius %.2f) v2 %s (intensity %.2f threshold %.2f knee %.2f diffusion %.1f clamp %.0f)",
+        s_story_on = env_float("DM_POSTFX_STORY", 1) != 0;
+        LOG("[mod post-effects] %s (DM_MOD_POSTEFFECTS=%s) v1 %s%s (intensity %.2f threshold %.2f knee %.2f radius %.2f) v2 %s (intensity %.2f threshold %.2f knee %.2f diffusion %.1f clamp %.0f) story %s",
             on ? "on" : "off", v ? v : "unset", s_v1_on ? "on" : "off", s_v1_force ? " forced" : "", s_v1_intensity, s_v1_threshold, s_v1_knee, s_v1_radius,
-            s_v2_on ? "on" : "off", s_v2_intensity, s_v2_threshold, s_v2_knee, s_v2_diffusion, s_v2_clamp);
+            s_v2_on ? "on" : "off", s_v2_intensity, s_v2_threshold, s_v2_knee, s_v2_diffusion, s_v2_clamp, s_story_on ? "on" : "off");
     }
     return on;
 }
@@ -274,9 +282,38 @@ static void on_probe(uint64_t *r, int p) {
     }
 }
 
+static uint8_t *s_main;
+
+static uint8_t *main_base(void) {
+    if (!s_main)
+        for (int i = 0; i < g_nmod; i++)
+            if (!strcmp(g_mod[i].name, "main") && !g_mod[i].nro) { s_main = g_mod[i].base; break; }
+    return s_main;
+}
+
+#define FN(rva, ret, ...) ((ret (*)(__VA_ARGS__))(s_main + (rva)))
+
+static void story_post_run(uint64_t *r, int p) {
+    (void)p;
+    if (!main_base()) return;
+    const uint8_t *controller = (const uint8_t *)(uintptr_t)r[19];
+    uint8_t *pp = controller ? (uint8_t *)ptr(controller, F_CFC_POSTPROCESSOR) : NULL;
+    if (!pp) return;
+    if ((uint8_t)FN(K_BEHAVIOUR_GET_ENABLED, int, void *, const void *)(pp, NULL)) return;
+    FN(K_BEHAVIOUR_SET_ENABLED, void, void *, int, const void *)(pp, 1, NULL);
+    static int hits;
+    int n = ++hits;
+    LOG("[mod post-effects] story: v1 behaviour %p switched on after SetFilter #%d frame %llu", (const void *)pp, n, (unsigned long long)dm_nvn_frame_count());
+}
+
+static void on_story_post(uint64_t *r, int p) {
+    if (mod_enabled() && s_story_on) dm_mod_gate_run(r, p, story_post_run);
+}
+
 __attribute__((constructor)) static void mod_post_effects_attach(void) {
     gate_obs_set(MODGATE_POST_EFFECTS_BLOOM_PRE, on_bloom_pre);
     gate_obs_set(MODGATE_POST_EFFECTS_BLOOM2_FORCE, on_bloom2_force);
     gate_obs_set(MODGATE_POST_EFFECTS_PROBE, on_probe);
+    gate_obs_set(MODGATE_POST_EFFECTS_STORY_POST, on_story_post);
     LOG("[mod post-effects] callbacks attached");
 }

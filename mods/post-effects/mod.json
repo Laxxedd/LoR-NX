@@ -12,6 +12,7 @@
   "gates": [
     "bloom_pre",
     "bloom2_force",
+    "story_post",
     "probe"
   ],
   "host": "host.c",
@@ -28,6 +29,12 @@
         "offset": "0x2e81150",
         "word": "a9bf7bfd",
         "reason": "Bloom.IsEnabledAndSupported (v2 stack), function entry: x0 = the blended Bloom settings of the camera's layer"
+      },
+      {
+        "gate": "story_post",
+        "offset": "0x2ae2e98",
+        "word": "a9424ff4",
+        "reason": "CamFilterController.SetFilter, the ldp x20,x19,[sp,#0x20] just before its only return epilogue (a ret itself cannot take a gate): x19 = the controller, postProcessor at +0x98"
       },
       {
         "gate": "probe",
