@@ -31,6 +31,21 @@ void dm_mod_gate_run(uint64_t *regs, int param, void (*fn)(uint64_t *, int));
 
 #define K_BEHAVIOUR_GET_ENABLED 0x19ADF90u
 #define K_BEHAVIOUR_SET_ENABLED 0x19ADFE0u
+#define K_COMPONENT_GET_GAMEOBJECT 0x19AE220u
+#define K_GAMEOBJECT_GET_LAYER 0x19AFBF0u
+#define K_OBJECT_GET_NAME 0x19B4080u
+#define K_CAMERA_GET_CULLINGMASK 0x17E9BE0u
+
+#define F_UIC_CAMERA 0x18
+#define F_UIC_VOLUME 0x118
+#define F_UIC_PPBLOOM 0x1E0
+#define F_VOL_SHAREDPROFILE 0x18
+#define F_VOL_GLOBAL 0x20
+#define F_VOL_WEIGHT 0x28
+#define F_VOL_PRIORITY 0x2C
+#define F_VOL_INTERNALPROFILE 0x40
+#define F_LAYER_TRIGGER 0x18
+#define F_LAYER_MASK 0x20
 
 #define F_PPB_PROFILE 0x18
 #define F_PPB_CAMERA 0x58
@@ -115,6 +130,7 @@ static float f32(const uint8_t *base, int off) { return *(const float *)(base + 
 static const uint8_t *ptr(const uint8_t *base, int off) { return *(const uint8_t *const *)(base + off); }
 
 static uint8_t *s_main;
+static const uint8_t *s_v2_layer;
 
 static uint8_t *main_base(void) {
     if (!s_main)
@@ -274,6 +290,7 @@ static void on_probe(uint64_t *r, int p) {
         LOG("[mod post-effects] probe v2 PostProcessLayer.OnEnable #%d frame %llu: %p volumeLayer 0x%x antialiasing %d", n, frame, (const void *)o, o ? *(const uint32_t *)(o + 0x20) : 0, o ? *(const int *)(o + 0x28) : -1);
         break;
     case 4:
+        s_v2_layer = o;
         LOG("[mod post-effects] probe v2 PostProcessLayer.OnPreCull #%d frame %llu: %p volumeLayer 0x%x", n, frame, (const void *)o, o ? *(const uint32_t *)(o + 0x20) : 0);
         break;
     case 5:
@@ -380,8 +397,48 @@ static void on_combat_post(uint64_t *r, int p) {
     if (mod_enabled() && s_combat_on) dm_mod_gate_run(r, p, combat_post_run);
 }
 
+static void obj_desc(const char *what, const void *comp, char *out, int cap) {
+    char name[64];
+    if (!comp) {
+        snprintf(out, (size_t)cap, "%s (null)", what);
+        return;
+    }
+    void *go = FN(K_COMPONENT_GET_GAMEOBJECT, void *, const void *, const void *)(comp, NULL);
+    int layer = go ? FN(K_GAMEOBJECT_GET_LAYER, int, void *, const void *)(go, NULL) : -1;
+    string_ascii(FN(K_OBJECT_GET_NAME, const uint8_t *, const void *, const void *)(comp, NULL), name, sizeof name);
+    snprintf(out, (size_t)cap, "%s %p \"%s\" layer %d", what, comp, name, layer);
+}
+
+static void ui_diag_run(uint64_t *r, int p) {
+    (void)p;
+    static int hits;
+    if (hits >= 6 || !main_base()) return;
+    const uint8_t *ui = (const uint8_t *)(uintptr_t)r[19];
+    if (!ui) return;
+    hits++;
+    const uint8_t *vol = ptr(ui, F_UIC_VOLUME);
+    const uint8_t *cam = ptr(ui, F_UIC_CAMERA);
+    const uint8_t *bloom = ptr(ui, F_UIC_PPBLOOM);
+    char dv[160], dc[160], dl[160];
+    obj_desc("volume", vol, dv, sizeof dv);
+    obj_desc("uiCamera", cam, dc, sizeof dc);
+    obj_desc("v2 layer", s_v2_layer, dl, sizeof dl);
+    LOG("[mod post-effects] ui diag #%d frame %llu: %s global %d weight %.3f priority %.3f sharedProfile %p internalProfile %p", hits, (unsigned long long)dm_nvn_frame_count(), dv,
+        vol ? vol[F_VOL_GLOBAL] : -1, vol ? f32(vol, F_VOL_WEIGHT) : -1.0f, vol ? f32(vol, F_VOL_PRIORITY) : -1.0f, vol ? (const void *)ptr(vol, F_VOL_SHAREDPROFILE) : NULL, vol ? (const void *)ptr(vol, F_VOL_INTERNALPROFILE) : NULL);
+    LOG("[mod post-effects] ui diag #%d: %s cullingMask 0x%x", hits, dc, cam ? (unsigned)FN(K_CAMERA_GET_CULLINGMASK, int, const void *, const void *)(cam, NULL) : 0u);
+    LOG("[mod post-effects] ui diag #%d: %s volumeLayer 0x%x trigger %p", hits, dl, s_v2_layer ? *(const uint32_t *)(s_v2_layer + F_LAYER_MASK) : 0u, s_v2_layer ? (const void *)ptr(s_v2_layer, F_LAYER_TRIGGER) : NULL);
+    const uint8_t *en = bloom ? ptr(bloom, F_V2_ENABLED) : NULL;
+    const uint8_t *in = bloom ? ptr(bloom, F_V2_INTENSITY) : NULL;
+    const uint8_t *th = bloom ? ptr(bloom, F_V2_THRESHOLD) : NULL;
+    const uint8_t *kn = bloom ? ptr(bloom, F_V2_KNEE) : NULL;
+    LOG("[mod post-effects] ui diag #%d: pp_bloom %p enabled override %d value %d, intensity override %d value %.3f, threshold override %d value %.3f, knee override %d value %.3f", hits, (const void *)bloom,
+        en ? en[P_OVERRIDE] : -1, en ? en[P_BOOL] : -1, in ? in[P_OVERRIDE] : -1, in ? f32(in, P_FLOAT) : -1.0f, th ? th[P_OVERRIDE] : -1, th ? f32(th, P_FLOAT) : -1.0f, kn ? kn[P_OVERRIDE] : -1, kn ? f32(kn, P_FLOAT) : -1.0f);
+}
+
 static void on_ui_platform(uint64_t *r, int p) {
-    if (!mod_enabled() || !s_ui_on) return;
+    if (!mod_enabled()) return;
+    if (p == 4) dm_mod_gate_run(r, p, ui_diag_run);
+    if (!s_ui_on) return;
     if ((uint32_t)r[8] != 4u) return;
     r[8] = 2;
     static int hits;
