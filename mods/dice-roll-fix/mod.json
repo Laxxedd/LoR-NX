@@ -3,7 +3,7 @@
   "title": "Dice Roll Fix (Library of Ruina)",
   "description": "The Switch exefs patch Speed Dice Fix / Dice Roll Fix of Library-of-Ruina-NX-Mods (a port of the PC mod by uGuardian), for Library of Ruina 1.0.3.",
   "launcher": {
-    "env": "DM_MOD_DICEROLLFIX",
+    "env": "DM_MOD_DICEROLLFIX", "default": "1",
     "category": "Fixes",
     "label": "Speed Dice Fix",
     "note": "Optimizes LoR’s Dice Roll functions to be more efficient. Original mod by [uGuardian’s Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=2797351574)"

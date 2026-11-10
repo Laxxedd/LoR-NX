@@ -3,7 +3,7 @@
 
     python3 scripts/apply_mods.py [--mods speed-dice[,other]] [--out DIR]
 
-Every mod in mods/ is built in unless --mods names a subset. A mod is off at run time until the player turns it on (the launcher's Mods section, or its env switch = 1).
+Every mod in mods/ is built in unless --mods names a subset. A mod is off at run time until the player turns it on, unless its launcher "default" is 1 (the launcher's Mods section, or its env switch = 1).
 
 For the selected mods it
   - reads the Atmosphere exefs patches (.ips / .pchtxt) of a mod's "exefs" folder and writes each patched word as a switchable patch, DIR/patches.json "SWITCH": the rewriter (dm/tools/patch_nso.py "Switchable patches") makes the word run
@@ -12,7 +12,7 @@ For the selected mods it
   - writes DIR/patches.json, the gates for the rewriter (dm/tools/patch_nso.py reads it through DM_MODS_PATCHES);
   - copies each mod's romfs folder to DIR/romfs/<mod id>/, which build_ipa.sh packs into the app as <App>/modromfs/<mod id>/ (DM_MODS_ROMFS, also exported through $GITHUB_ENV); the host (hle_fs.c) adds
     the folder of every mod whose switch is 1 to the RomFS overlay by itself, so the player copies nothing and sets no DM_ROMFS_OVERLAY. The mods with a romfs folder are listed in dm/host/hle_modromfs_gen.h;
-  - writes DIR/launcher_mods.json, one off-by-default toggle per mod under the launcher section "Mods" (dm/games/settings.py adds it to the app's launcher.json when DM_MODS_SETTINGS names it).
+  - writes DIR/launcher_mods.json, one toggle per mod, off by default unless its launcher "default" is 1 under the launcher section "Mods" (dm/games/settings.py adds it to the app's launcher.json when DM_MODS_SETTINGS names it).
 With --mods none it removes what an earlier run left. In GitHub Actions it also exports DM_MODS_PATCHES through $GITHUB_ENV.
 """
 import argparse, glob, json, os, re, shutil, struct, sys
@@ -127,8 +127,10 @@ def main():
         if not re.fullmatch(r'DM_[A-Z0-9_]+', env): sys.exit(f'[RED] {mid}: launcher env {env!r} must match DM_[A-Z0-9_]+')
         category = lc.get('category', 'Miscellaneous')
         if category not in CATEGORIES: sys.exit(f'[RED] {mid}: launcher category {category!r} must be one of {", ".join(CATEGORIES)}')
+        main_default = str(lc.get('default', '0'))
+        if main_default not in ('0', '1'): sys.exit(f'[RED] {mid}: launcher default {main_default!r} must be 0 or 1')
         rows = [{'env': env, 'kind': 'toggle', 'section': 'Mods', 'category': category, 'label': lc.get('label', mod.get('title', mid)),
-                 'note': lc.get('note', mod.get('description', '')), 'default': '0', 'on': '1', 'off': '0'}]
+                 'note': lc.get('note', mod.get('description', '')), 'default': main_default, 'on': '1', 'off': '0'}]
         if lc.get('forced'):   # "<VAR>=<value>": the switch follows that launcher setting (on while it has that value, off otherwise) and is not offered on the mods page (touch-ui follows Touchscreen Mode)
             if not re.fullmatch(r'DM_[A-Z0-9_]+=[^;=]+', lc['forced']): sys.exit(f'[RED] {mid}: launcher forced {lc["forced"]!r} must be <DM_VAR>=<value>')
             rows[0]['forced'] = lc['forced']

@@ -3,7 +3,7 @@
   "title": "CPU Loop Fix (Library of Ruina)",
   "description": "Fixes a pointless loop in the Unity binding that copies native GetComponents results into a managed List: after the results are copied, the loop walked every unused slot up to the list's capacity and discarded the result, wasting CPU on every call. Measured at about 10% of main-thread samples, and 26% of main-thread samples in late frames, in a Library of Ruina 1.0.3 capture. For Library of Ruina 1.0.3.",
   "launcher": {
-    "env": "DM_MOD_COMPLISTTAIL",
+    "env": "DM_MOD_COMPLISTTAIL", "default": "1",
     "category": "Fixes",
     "label": "CPU Loop Fix",
     "note": "Fixes a pointless loop in the game's code that wasted CPU time every time the UI rebuilt itself. Frees up processing power for smoother performance."

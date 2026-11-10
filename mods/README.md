@@ -1,10 +1,10 @@
 # Mods
 
-Each folder is one mod. Every mod in this folder is built into every IPA, and each one is **off until the player turns it on**: the settings screen has a *Mods* section with a *Browse mods* button, which opens a page with one switch per mod, grouped by category (it sets the mod's env switch, e.g. `DM_MOD_SPEEDDICE=1`; `Documents/env.txt` wins over the screen). A change takes effect at the next start.
+Each folder is one mod. Every mod in this folder is built into every IPA, and each one is **off until the player turns it on** unless its `launcher` has `"default": "1"`: the settings screen has a *Mods* section with a *Browse mods* button, which opens a page with one switch per mod, grouped by category (it sets the mod's env switch, e.g. `DM_MOD_SPEEDDICE=1`; `Documents/env.txt` wins over the screen). A change takes effect at the next start.
 
 ```
 mods/<id>/
-  mod.json   id, title, launcher (env, label, note of its switch, category: Performance, Quality of Life, Fixes, Content, Miscellaneous (default) or Cheats; the group on the launcher's mods page; forced: `<DM_VAR>=<value>`, a launcher setting the switch follows: on while it has that value, off otherwise, and the switch is not offered on the mods page, as Touchscreen Mode does for touch-ui), gates (names), obs (gate rows per build of main), host (C file), romfs (folder)
+  mod.json   id, title, launcher (env, label, note of its switch, default: `1` for a mod that is on until the player turns it off (0 when absent), category: Performance, Quality of Life, Fixes, Content, Miscellaneous (default) or Cheats; the group on the launcher's mods page; forced: `<DM_VAR>=<value>`, a launcher setting the switch follows: on while it has that value, off otherwise, and the switch is not offered on the mods page, as Touchscreen Mode does for touch-ui), gates (names), obs (gate rows per build of main), host (C file), romfs (folder)
   host.c     callbacks for the gates (call dm_mod_gate_run from dm/host/hle_modcall.c to run on the guest stack); attaches them from a constructor with gate_obs_set(), and returns from each callback while its env switch is not 1 (read at the first gate hit: the launcher's choices are not in the environment yet when constructors run)
   romfs/     files for the RomFS overlay (Data/StreamingAssets/... as in the game's RomFS); packed into the app, nothing to copy to the device
 ```

@@ -34,12 +34,12 @@ DM_PRESENT_SNAP	toggle	-	DM_GAME_PRESENT_SNAP	gfxapi:nvn	Performance	Frame buffe
 DM_PSO_MTL4	toggle	-	DM_GAME_PSO_MTL4|1	gfxapi:nvn	Performance	Metal 4 pipelines	Keeps a pipeline archive; uses more memory.
 DM_PSO_PREBUILD	toggle	-	1	gfxapi:nvn	Performance	Pipeline prebuild	The first start waits a few minutes for it, once.	needs=DM_PSO_MTL4=1
 DM_NVN_ENC_THREAD	toggle	-	1|DM_GAME_ENC_THREAD	gfxapi:nvn	Performance	Encode thread
-DM_NVN_MSAA_CAP	toggle	-	0	gfxapi:nvn	Performance	Disable MSAA	Renders the game's multisampled targets at one sample per pixel. Removes most of the extra GPU cost of High texture quality, with rougher edges.
-DM_NVN_TBDR	toggle	-	0	gfxapi:nvn	Performance	Tile-based pass optimizations	Merges render passes and skips loading and storing images the GPU never reads, cutting memory traffic. May cause visual glitches.
+DM_NVN_MSAA_CAP	toggle	-	1	gfxapi:nvn	Performance	Disable MSAA	Renders the game's multisampled targets at one sample per pixel. Removes most of the extra GPU cost of High texture quality, with rougher edges.
+DM_NVN_TBDR	toggle	-	1	gfxapi:nvn	Performance	Tile-based pass optimizations	Merges render passes and skips loading and storing images the GPU never reads, cutting memory traffic. May cause visual glitches.
 DM_NVN_UB_DEFER	toggle	1/auto	1	gfxapi:nvn	Performance	Defer uniform updates	Keeps a render pass open across shader constant updates instead of ending it at each one. The pass optimizations save little without it.	needs=DM_NVN_TBDR=1
-DM_NVN_DS_INPASS	toggle	-	0	gfxapi:nvn	Performance	Keep passes open for depth-stencil clears	Keeps a pass open when the game detours to clear a depth-stencil buffer (mask effects), instead of storing and reloading the whole scene each time.	needs=DM_NVN_TBDR=1
-DM_NVN_RESOLVE_ELIDE	toggle	-	0	gfxapi:nvn	Performance	Skip redundant resolve copies	Skips whole-image copies of the scene that are overwritten before anything reads them. Most useful together with Disable MSAA.	needs=DM_NVN_TBDR=1
-DM_NVN_LC_ELIDE	toggle	-	0	gfxapi:nvn	Performance	Skip redundant depth-stencil clears	Drops a pending depth or stencil clear when a later full clear comes before anything reads it.	needs=DM_NVN_TBDR=1
+DM_NVN_DS_INPASS	toggle	-	1	gfxapi:nvn	Performance	Keep passes open for depth-stencil clears	Keeps a pass open when the game detours to clear a depth-stencil buffer (mask effects), instead of storing and reloading the whole scene each time.	needs=DM_NVN_TBDR=1
+DM_NVN_RESOLVE_ELIDE	toggle	-	1	gfxapi:nvn	Performance	Skip redundant resolve copies	Skips whole-image copies of the scene that are overwritten before anything reads them. Most useful together with Disable MSAA.	needs=DM_NVN_TBDR=1
+DM_NVN_LC_ELIDE	toggle	-	1	gfxapi:nvn	Performance	Skip redundant depth-stencil clears	Drops a pending depth or stencil clear when a later full clear comes before anything reads it.	needs=DM_NVN_TBDR=1
 DM_FPS_HOLD	toggle	on/off	DM_GAME_FPS_HOLD	DM_GAME_FPS_TARGET!=0	Performance	Hold frames when late
 DM_METAL_HUD	toggle	-	0	always	Performance	Performance HUD
 DM_RAM_EXTEND	toggle	-	0	platform:ios	Memory	Extend Memory Usage	Offload the app's memory to its Appex. so it doesn't count towards the limit. May cause instability, only use when necessary.

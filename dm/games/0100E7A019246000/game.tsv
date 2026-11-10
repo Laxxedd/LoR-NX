@@ -36,3 +36,7 @@ sys_resource	0x1000000
 shader_groups	/Data/=data
 shader_note	Library of Ruina shaders
 
+
+# ---- Performance ----
+present_snap	on
+pso_mtl4	on

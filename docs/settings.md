@@ -181,11 +181,11 @@ The app turns the game's graphics commands into Metal commands on a thread of it
 Renders the game's multisampled targets with one sample per pixel. Library of Ruina's High texture quality draws its 1080p RGBA16F scene at 2x MSAA and loads and stores it in three passes, which costs several GPU milliseconds on an A15.
 
 - **When to change it:** turn it on when High texture quality drops below 60 fps.
-- **Cost:** rougher edges. Off by default.
+- **Cost:** rougher edges. On by default.
 
 ### Tile-based pass optimizations
 
-Merges render passes and skips loading and storing images the GPU never reads, so less data travels between the tile memory and the main memory each frame. Off by default, because the game's bindless textures can defeat the check that decides which images are read. The four settings below only show while this one is on.
+Merges render passes and skips loading and storing images the GPU never reads, so less data travels between the tile memory and the main memory each frame. On by default, although the game's bindless textures can defeat the check that decides which images are read. The four settings below only show while this one is on.
 
 - **When to change it:** turn it on to try to save GPU time; turn it off if the picture glitches.
 - **Cost:** may cause visual glitches, and lowers the frame rate when **Defer uniform updates** is off.
@@ -198,15 +198,15 @@ Keeps a render pass open across the game's shader constant updates and applies t
 
 Keeps a render pass open when the game detours to clear a depth-stencil buffer for its mask passes, drawing the clear inside the pass and delaying the clears of other depth-only targets, instead of storing and loading the scene's colour image each time. Off by default.
 
-- **Cost:** if the HP and stagger rings or UI masks draw wrongly, turn it off.
+- **Cost:** if the HP and stagger rings or UI masks draw wrongly, turn it off. On by default.
 
 ### Skip redundant resolve copies
 
-Skips a whole-image copy of the scene when the next operation on its destination is a copy of the same source over all of it and nothing can read the destination in between. High texture quality copies its scene nine times a frame and reads the result twice. Most useful with **Disable MSAA**, which turns those resolves into plain copies. Off by default.
+Skips a whole-image copy of the scene when the next operation on its destination is a copy of the same source over all of it and nothing can read the destination in between. High texture quality copies its scene nine times a frame and reads the result twice. Most useful with **Disable MSAA**, which turns those resolves into plain copies. On by default.
 
 ### Skip redundant depth-stencil clears
 
-Drops a waiting depth or stencil clear when a later full clear of the same image comes before any read. Off by default.
+Drops a waiting depth or stencil clear when a later full clear of the same image comes before any read. On by default.
 
 ### Hold frames when late
 
