@@ -19,6 +19,15 @@ class VersionTests(unittest.TestCase):
         self.assertEqual(version.bump('1.2.3', 'patch'), '1.2.4')
         self.assertEqual(version.bump('1.2.3-rc.1+b5', 'patch'), '1.2.4')
 
+    def test_resolve_keeps_bumps_or_sets(self):
+        self.assertEqual(version.resolve('1.2.3', ''), '1.2.3')
+        self.assertEqual(version.resolve('1.2.3', '  '), '1.2.3')
+        self.assertEqual(version.resolve('1.2.3', 'minor'), '1.3.0')
+        self.assertEqual(version.resolve('1.2.3', '2.0.0-rc.1'), '2.0.0-rc.1')
+        self.assertEqual(version.resolve('1.2.3', 'v0.4.0'), '0.4.0')
+        with self.assertRaises(SystemExit):
+            version.resolve('1.2.3', 'latest')
+
     def test_malformed_versions_are_refused(self):
         for text in ('1.2', '01.2.3', 'v1.2.3', '1.2.3.4', '1.2.3-', ''):
             with self.subTest(text=text), tempfile.TemporaryDirectory() as tmp:

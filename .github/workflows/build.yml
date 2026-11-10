@@ -10,6 +10,11 @@ on:
         required: false
         default: "Library of Ruina"
         type: string
+      version:
+        description: "LoR NX version: empty uses the VERSION file; major, minor or patch bumps it; or a version such as 0.1.0"
+        required: false
+        default: ""
+        type: string
       extra_args:
         description: "Additional parameters"
         required: false
@@ -276,6 +281,15 @@ jobs:
           key: nxshader-v1-${{ steps.links.outputs.hash }}-${{ hashFiles('dm/gfx/**', 'dm/games/**', 'scripts/build_ipa_from_nsp.py') }}
           restore-keys: |
             nxshader-v1-${{ steps.links.outputs.hash }}-
+
+      - name: Set version
+        env:
+          VERSION_INPUT: ${{ inputs.version }}
+        run: |
+          set -eo pipefail
+          version=$(python3 scripts/version.py apply "$VERSION_INPUT")
+          echo "LoR NX v$version"
+          echo "LoR NX v$version" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Apply mods
         run: python3 scripts/apply_mods.py --out "$HOME/mods"
