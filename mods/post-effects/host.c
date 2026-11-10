@@ -3,12 +3,14 @@
 // effects Bloom_RFX4 and RFX4_DistortionAndBloom, and CameraFilterPack_Blur_Bloom. The shaders of all of them are in the Switch build, so what the Switch build leaves out is data (which components its cameras carry, their settings).
 //   bloom_pre     PostProcessingBehaviour.OnPreCull, before mov x19,x0 (x0 = the behaviour): profile = *(this+0x18), bloom model = *(profile+0x58); a disabled model gets m_Enabled = 1 and the v1 settings below,
 //                 an enabled one gets them too while DM_POSTFX_V1_FORCE is 1 (the default; the game's own values, intensity 0.25 and threshold 1.0, bloom next to nothing on a camera that is not HDR), else only an intensity <= 0 is replaced;
-//                 the first hit of every behaviour is logged with the model's values before the change
+//                 the first hit of every behaviour is logged with the model's values before the change, with its camera and the frame; DM_POSTFX_V1=0 keeps this log and changes nothing
 //   bloom2_force  Bloom.IsEnabledAndSupported, at its entry (x0 = the Bloom settings blended for this camera): when `enabled` is false or intensity <= 0, enabled = true and the v2 settings below are set
 //   probe         the entry of the other bloom sources (param: 1 v1 OnEnable, 3 v2 layer OnEnable, 4 v2 layer OnPreCull, 5 Bloom_RFX4.OnRenderImage, 6 RFX4_DistortionAndBloom.LateUpdate,
 //                 7 CameraFilterPack_Blur_Bloom.OnRenderImage, 8 UIController.SetBloomeIntensity, 9 Bloom_RFX4.OnEnable,
-//                 10 CamFilterController.SetFilter, 11 CamFilterController.BloomRoutine, 12 CamFilterController.BloomAndPillarOfLightRoutine): logs the first hit with the object's bloom settings, then hit 10, 100, 1000 ...;
-//                 params 1, 3, 9, 10, 11 and 12 (calls that happen once per scene or filter change) log every hit, with the frame number
+//                 10 CamFilterController.SetFilter, 11 CamFilterController.BloomRoutine, 12 CamFilterController.BloomAndPillarOfLightRoutine,
+//                 13 PostProcessingBehaviour.OnDisable, 14 PostProcessingBehaviour.OnRenderImage): logs the first hit with the object's bloom settings, then hit 10, 100, 1000 ...;
+//                 params 1, 3, 9, 10, 11, 12 and 13 (calls that happen once per scene or filter change) log every hit, with the frame number;
+//                 param 14 logs the first render of each v1 behaviour, then every power of ten ... (is it ever rendered, and through which camera)
 // Documents/env.txt can change the values: v1 DM_POSTFX_BLOOM_INTENSITY (0.8), _THRESHOLD (0.6), _KNEE (0.5), _RADIUS (5.0), _ANTIFLICKER (0), DM_POSTFX_V1_FORCE (1); v2 DM_POSTFX_V2_INTENSITY (1.0), _THRESHOLD (1.0), _KNEE (0.5),
 //   _DIFFUSION (7.0), _CLAMP (65472.0); DM_POSTFX_V1=0 / DM_POSTFX_V2=0 turn one of the two forces off.
 // Off by default: DM_MOD_POSTEFFECTS=1 turns the callbacks on (the launcher's Mods > Post Effects switch, or env.txt). The gates are always in the code and pass through while it is off.
@@ -16,6 +18,7 @@
 #include "hle_mods_gen.h"
 
 #define F_PPB_PROFILE 0x18
+#define F_PPB_CAMERA 0x58
 #define F_PROFILE_BLOOM 0x58
 #define F_MODEL_ENABLED 0x10
 #define F_V1_INTENSITY 0x18
@@ -109,7 +112,7 @@ static void string_ascii(const uint8_t *str, char *out, int cap) {
 
 static void on_bloom_pre(uint64_t *r, int p) {
     (void)p;
-    if (!mod_enabled() || !s_v1_on) return;
+    if (!mod_enabled()) return;
     const uint8_t *ppb = (const uint8_t *)(uintptr_t)r[0];
     if (!ppb) return;
     const uint8_t *profile = ptr(ppb, F_PPB_PROFILE);
@@ -130,9 +133,11 @@ static void on_bloom_pre(uint64_t *r, int p) {
     }
     uint8_t was_on = bloom[F_MODEL_ENABLED];
     float was_i = f32(bloom, F_V1_INTENSITY);
+    float was_t = f32(bloom, F_V1_THRESHOLD);
     if (is_new)
-        LOG("[mod post-effects] v1 behaviour #%d first seen at OnPreCull #%d frame %llu: %p profile %p bloom model %p enabled %d intensity %.3f threshold %.3f knee %.3f radius %.3f antiflicker %d",
-            nseen, hits, (unsigned long long)dm_nvn_frame_count(), (const void *)ppb, (const void *)profile, (void *)bloom, was_on, was_i, f32(bloom, F_V1_THRESHOLD), f32(bloom, F_V1_KNEE), f32(bloom, F_V1_RADIUS), bloom[F_V1_ANTIFLICKER]);
+        LOG("[mod post-effects] v1 behaviour #%d first seen at OnPreCull #%d frame %llu: %p camera %p profile %p bloom model %p enabled %d intensity %.3f threshold %.3f knee %.3f radius %.3f antiflicker %d",
+            nseen, hits, (unsigned long long)dm_nvn_frame_count(), (const void *)ppb, (const void *)ptr(ppb, F_PPB_CAMERA), (const void *)profile, (void *)bloom, was_on, was_i, was_t, f32(bloom, F_V1_KNEE), f32(bloom, F_V1_RADIUS), bloom[F_V1_ANTIFLICKER]);
+    if (!s_v1_on) return;
     if (!was_on || s_v1_force) {
         *(float *)(bloom + F_V1_INTENSITY) = s_v1_intensity;
         *(float *)(bloom + F_V1_THRESHOLD) = s_v1_threshold;
@@ -145,7 +150,7 @@ static void on_bloom_pre(uint64_t *r, int p) {
     }
     if (log_it)
         LOG("[mod post-effects] v1 OnPreCull #%d: bloom model %p (profile %p) enabled %d intensity %.3f threshold %.3f -> enabled %d intensity %.3f",
-            hits, (void *)bloom, (const void *)profile, was_on, was_i, f32(bloom, F_V1_THRESHOLD), bloom[F_MODEL_ENABLED], f32(bloom, F_V1_INTENSITY));
+            hits, (void *)bloom, (const void *)profile, was_on, was_i, was_t, bloom[F_MODEL_ENABLED], f32(bloom, F_V1_INTENSITY));
 }
 
 static void set_float_param(uint8_t *settings, int field, float v) {
@@ -185,7 +190,7 @@ static void on_probe(uint64_t *r, int p) {
     if (!mod_enabled()) return;
     static int hits[16];
     if (p < 0 || p >= 16) return;
-    if (p == 1 || p == 3 || (p >= 9 && p <= 12)) hits[p]++;
+    if (p == 1 || p == 3 || (p >= 9 && p <= 14)) hits[p]++;
     else if (!mod_log_hit(&hits[p])) return;
     const unsigned long long frame = (unsigned long long)dm_nvn_frame_count();
     const uint8_t *o = (const uint8_t *)(uintptr_t)r[0];
@@ -194,8 +199,9 @@ static void on_probe(uint64_t *r, int p) {
     case 1: {
         const uint8_t *prof = o ? ptr(o, F_PPB_PROFILE) : NULL;
         const uint8_t *bl = prof ? ptr(prof, F_PROFILE_BLOOM) : NULL;
-        LOG("[mod post-effects] probe v1 PostProcessingBehaviour.OnEnable #%d frame %llu: %p profile %p bloom model %p enabled %d intensity %.3f", n, frame, (const void *)o, (const void *)prof, (const void *)bl,
-            bl ? bl[F_MODEL_ENABLED] : -1, bl ? f32(bl, F_V1_INTENSITY) : -1.0f);
+        LOG("[mod post-effects] probe v1 PostProcessingBehaviour.OnEnable #%d frame %llu: %p camera %p profile %p bloom model %p enabled %d intensity %.3f threshold %.3f knee %.3f radius %.3f", n, frame, (const void *)o,
+            o ? (const void *)ptr(o, F_PPB_CAMERA) : NULL, (const void *)prof, (const void *)bl, bl ? bl[F_MODEL_ENABLED] : -1, bl ? f32(bl, F_V1_INTENSITY) : -1.0f,
+            bl ? f32(bl, F_V1_THRESHOLD) : -1.0f, bl ? f32(bl, F_V1_KNEE) : -1.0f, bl ? f32(bl, F_V1_RADIUS) : -1.0f);
         break; }
     case 3:
         LOG("[mod post-effects] probe v2 PostProcessLayer.OnEnable #%d frame %llu: %p volumeLayer 0x%x antialiasing %d", n, frame, (const void *)o, o ? *(const uint32_t *)(o + 0x20) : 0, o ? *(const int *)(o + 0x28) : -1);
@@ -233,6 +239,30 @@ static void on_probe(uint64_t *r, int p) {
         LOG("[mod post-effects] probe CamFilterController.SetFilter #%d frame %llu: controller %p filter \"%s\" postProcessor %p v1 bloom model %p enabled %d intensity %.3f bloomFilter %p amount %.3f glow %.3f",
             n, frame, (const void *)o, id, (const void *)pp, (const void *)bl, bl ? bl[F_MODEL_ENABLED] : -1, bl ? f32(bl, F_V1_INTENSITY) : -1.0f,
             (const void *)bf, bf ? f32(bf, 0x30) : -1.0f, bf ? f32(bf, 0x34) : -1.0f);
+        break; }
+    case 13: {
+        const uint8_t *prof = o ? ptr(o, F_PPB_PROFILE) : NULL;
+        const uint8_t *bl = prof ? ptr(prof, F_PROFILE_BLOOM) : NULL;
+        LOG("[mod post-effects] probe v1 PostProcessingBehaviour.OnDisable #%d frame %llu: %p camera %p profile %p bloom model %p enabled %d intensity %.3f", n, frame, (const void *)o,
+            o ? (const void *)ptr(o, F_PPB_CAMERA) : NULL, (const void *)prof, (const void *)bl, bl ? bl[F_MODEL_ENABLED] : -1, bl ? f32(bl, F_V1_INTENSITY) : -1.0f);
+        break; }
+    case 14: {
+        static const uint8_t *seen[64];
+        static int count[64];
+        static int nseen;
+        int k = 0;
+        for (; k < nseen; k++)
+            if (seen[k] == o) break;
+        if (k == nseen) {
+            if (nseen >= 64) break;
+            seen[nseen++] = o;
+        }
+        int c = ++count[k];
+        int log_it = c == 1;
+        for (int q = 100; q <= 1000000; q *= 10)
+            if (c == q) log_it = 1;
+        if (log_it)
+            LOG("[mod post-effects] probe v1 PostProcessingBehaviour.OnRenderImage behaviour %p (#%d) camera %p frame %llu: render #%d", (const void *)o, k + 1, o ? (const void *)ptr(o, F_PPB_CAMERA) : NULL, frame, c);
         break; }
     case 11:
     case 12:

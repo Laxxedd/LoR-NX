@@ -105,6 +105,20 @@
         "offset": "0x2ae3530",
         "word": "a9bd7bfd",
         "reason": "CamFilterController.BloomAndPillarOfLightRoutine: x0 = the controller"
+      },
+      {
+        "gate": "probe",
+        "param": 13,
+        "offset": "0x22dba70",
+        "word": "d10203ff",
+        "reason": "PostProcessingBehaviour.OnDisable (v1 stack): x0 = the behaviour"
+      },
+      {
+        "gate": "probe",
+        "param": 14,
+        "offset": "0x22dafc0",
+        "word": "a9ba7bfd",
+        "reason": "PostProcessingBehaviour.OnRenderImage (v1 stack): x0 = the behaviour; the bloom of the v1 stack is drawn from here"
       }
     ]
   }
