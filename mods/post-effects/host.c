@@ -12,7 +12,8 @@
 //                 10 CamFilterController.SetFilter, 11 CamFilterController.BloomRoutine, 12 CamFilterController.BloomAndPillarOfLightRoutine,
 //                 13 PostProcessingBehaviour.OnDisable, 14 PostProcessingBehaviour.OnRenderImage): logs the first hit with the object's bloom settings, then hit 10, 100, 1000 ...;
 //                 params 1, 3, 9, 10, 11, 12 and 13 (calls that happen once per scene or filter change) log every hit, with the frame number;
-//                 param 14 logs the first render of each v1 behaviour, then every power of ten ... (is it ever rendered, and through which camera)
+//                 param 14 logs the first render of each v1 behaviour, then every power of ten ... (is it ever rendered, and through which camera);
+//                 params 1 and 13 also log the caller and a frame pointer backtrace (main+offset) for the first 8 calls on a behaviour that has no camera yet (m_Camera is set by its first OnPreCull)
 // Documents/env.txt can change the values: v1 DM_POSTFX_BLOOM_INTENSITY (0.8), _THRESHOLD (0.6), _KNEE (0.5), _RADIUS (5.0), _ANTIFLICKER (0), DM_POSTFX_V1_FORCE (1); v2 DM_POSTFX_V2_INTENSITY (1.0), _THRESHOLD (1.0), _KNEE (0.5),
 //   _DIFFUSION (7.0), _CLAMP (65472.0); DM_POSTFX_V1=0 / DM_POSTFX_V2=0 turn one of the two forces off, DM_POSTFX_STORY (1).
 // Off by default: DM_MOD_POSTEFFECTS=1 turns the callbacks on (the launcher's Mods > Post Effects switch, or env.txt). The gates are always in the code and pass through while it is off.
@@ -100,6 +101,25 @@ static int mod_log_hit(int *count) {
 
 static float f32(const uint8_t *base, int off) { return *(const float *)(base + off); }
 static const uint8_t *ptr(const uint8_t *base, int off) { return *(const uint8_t *const *)(base + off); }
+
+static uint8_t *s_main;
+
+static uint8_t *main_base(void) {
+    if (!s_main)
+        for (int i = 0; i < g_nmod; i++)
+            if (!strcmp(g_mod[i].name, "main") && !g_mod[i].nro) { s_main = g_mod[i].base; break; }
+    return s_main;
+}
+
+#define FN(rva, ret, ...) ((ret (*)(__VA_ARGS__))(s_main + (rva)))
+
+static void log_caller(const char *what, const uint64_t *r, unsigned long long frame) {
+    const uint64_t *block = (const uint64_t *)(uintptr_t)r[99];
+    const uint64_t lr = block ? block[1] : 0;
+    const uint8_t *base = main_base();
+    LOG("[mod post-effects] %s frame %llu: caller main+%#llx", what, frame, lr && base ? (unsigned long long)(lr - (uint64_t)(uintptr_t)base) : 0ull);
+    dm_backtrace(r[29]);
+}
 
 static void string_ascii(const uint8_t *str, char *out, int cap) {
     int n = 0;
@@ -210,6 +230,11 @@ static void on_probe(uint64_t *r, int p) {
         LOG("[mod post-effects] probe v1 PostProcessingBehaviour.OnEnable #%d frame %llu: %p camera %p profile %p bloom model %p enabled %d intensity %.3f threshold %.3f knee %.3f radius %.3f", n, frame, (const void *)o,
             o ? (const void *)ptr(o, F_PPB_CAMERA) : NULL, (const void *)prof, (const void *)bl, bl ? bl[F_MODEL_ENABLED] : -1, bl ? f32(bl, F_V1_INTENSITY) : -1.0f,
             bl ? f32(bl, F_V1_THRESHOLD) : -1.0f, bl ? f32(bl, F_V1_KNEE) : -1.0f, bl ? f32(bl, F_V1_RADIUS) : -1.0f);
+        static int enable_traces;
+        if (o && !ptr(o, F_PPB_CAMERA) && enable_traces < 8) {
+            enable_traces++;
+            log_caller("v1 OnEnable without a camera", r, frame);
+        }
         break; }
     case 3:
         LOG("[mod post-effects] probe v2 PostProcessLayer.OnEnable #%d frame %llu: %p volumeLayer 0x%x antialiasing %d", n, frame, (const void *)o, o ? *(const uint32_t *)(o + 0x20) : 0, o ? *(const int *)(o + 0x28) : -1);
@@ -253,6 +278,11 @@ static void on_probe(uint64_t *r, int p) {
         const uint8_t *bl = prof ? ptr(prof, F_PROFILE_BLOOM) : NULL;
         LOG("[mod post-effects] probe v1 PostProcessingBehaviour.OnDisable #%d frame %llu: %p camera %p profile %p bloom model %p enabled %d intensity %.3f", n, frame, (const void *)o,
             o ? (const void *)ptr(o, F_PPB_CAMERA) : NULL, (const void *)prof, (const void *)bl, bl ? bl[F_MODEL_ENABLED] : -1, bl ? f32(bl, F_V1_INTENSITY) : -1.0f);
+        static int disable_traces;
+        if (o && !ptr(o, F_PPB_CAMERA) && disable_traces < 8) {
+            disable_traces++;
+            log_caller("v1 OnDisable without a camera", r, frame);
+        }
         break; }
     case 14: {
         static const uint8_t *seen[64];
@@ -281,17 +311,6 @@ static void on_probe(uint64_t *r, int p) {
         break;
     }
 }
-
-static uint8_t *s_main;
-
-static uint8_t *main_base(void) {
-    if (!s_main)
-        for (int i = 0; i < g_nmod; i++)
-            if (!strcmp(g_mod[i].name, "main") && !g_mod[i].nro) { s_main = g_mod[i].base; break; }
-    return s_main;
-}
-
-#define FN(rva, ret, ...) ((ret (*)(__VA_ARGS__))(s_main + (rva)))
 
 static void story_post_run(uint64_t *r, int p) {
     (void)p;
