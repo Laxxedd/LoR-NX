@@ -15,8 +15,9 @@
 //   ui_platform   the `cmp w8, #4` of the five `PlatformManager.PlatformType == NintentoSwitch` checks that keep the menu bloom off (param 0 UIController.CallUIPhase, 1 CallUIPhaseAsynchronous, 2 SetBloomeIntensity, 3 SetBloomThreshold, 4 SetBloomSoftKnee):
 //                 w8 = the platform type; a 4 becomes 2 so the game fetches the Bloom of its UI PostProcessVolume (UIController.pp_bloom, never fetched on Switch) and sets its intensity, threshold and soft knee per UI phase as on PC;
 //                 DM_POSTFX_UI=0 turns this off
-//   cam_platform  the `cmp w8, #4` of the three battle camera Switch checks that keep the PC-only blur and vignette off (param 0 BattleCamManager.BlurBackgroundCam, 1 BlurCharacterCam, 2 VignetteCharacterCam):
-//                 w8 = the platform type; a 4 becomes 2 so the game switches the background camera's v1 behaviour and starts BlurRoutine (depth of field of the character camera) and VignetteRoutine as on PC; DM_POSTFX_CAMBLUR=0 turns this off
+//   cam_platform  the `cmp w8, #4` of the four battle camera Switch checks (param 0 BattleCamManager.BlurBackgroundCam, 1 BlurCharacterCam, 2 VignetteCharacterCam keep the PC-only blur and vignette off; param 3 ResetCamSetting makes the Switch build disable the camera behaviours of combat, which PC leaves enabled):
+//                 w8 = the platform type; a 4 becomes 2 so the game switches the background camera's v1 behaviour and starts BlurRoutine (depth of field of the character camera) and VignetteRoutine as on PC; DM_POSTFX_CAMBLUR=0 turns params 0-2 off;
+//                 param 3 (DM_POSTFX_COMBAT_PC, default 1, needs DM_POSTFX_COMBAT) skips the five Behaviour.set_enabled(false) calls as on PC, and while it is active bloom_pre leaves the combat bloom models exactly as the game made them (neither the story values nor the combat values below are written); a CamFilterController.SetFilter (stories) ends it; DM_POSTFX_COMBAT_PC=0 gives the combat_keep path back
 //   models        the first OnPreCull of every v1 behaviour logs which of its profile's models are on (fog, depthOfField, motionBlur, bloom, colorGrading, vignette ...) and the depthOfField settings;
 //                 DM_POSTFX_DOF=1 switches the depthOfField model on for the combat behaviours combat_keep kept (default 0)
 //   probe         the entry of the other bloom sources (param: 1 v1 OnEnable, 3 v2 layer OnEnable, 4 v2 layer OnPreCull, 5 Bloom_RFX4.OnRenderImage, 6 RFX4_DistortionAndBloom.LateUpdate,
@@ -27,7 +28,7 @@
 //                 param 14 logs the first render of each v1 behaviour, then every power of ten ... (is it ever rendered, and through which camera);
 //                 params 1 and 13 also log the caller and a frame pointer backtrace (main+offset) for the first 8 calls on a behaviour that has no camera yet (m_Camera is set by its first OnPreCull)
 // Documents/env.txt can change the values: v1 DM_POSTFX_BLOOM_INTENSITY (0.25), _THRESHOLD (1.0), _KNEE (0.5), _RADIUS (7.0), _ANTIFLICKER (0), DM_POSTFX_V1_FORCE (0); v2 DM_POSTFX_V2_INTENSITY (1.0), _THRESHOLD (1.0), _KNEE (0.5),
-//   _DIFFUSION (7.0), _CLAMP (65472.0); DM_POSTFX_V1=0 turns the v1 force off, DM_POSTFX_V2=1 turns the v2 force on, DM_POSTFX_STORY (1), DM_POSTFX_COMBAT (1), DM_POSTFX_COMBAT_MASK (25), DM_POSTFX_COMBAT_INTENSITY (0.25), DM_POSTFX_COMBAT_THRESHOLD (0.6), DM_POSTFX_UI (1), DM_POSTFX_CAMBLUR (1), DM_POSTFX_DOF (0).
+//   _DIFFUSION (7.0), _CLAMP (65472.0); DM_POSTFX_V1=0 turns the v1 force off, DM_POSTFX_V2=1 turns the v2 force on, DM_POSTFX_STORY (1), DM_POSTFX_COMBAT (1), DM_POSTFX_COMBAT_MASK (25), DM_POSTFX_COMBAT_INTENSITY (0.25), DM_POSTFX_COMBAT_THRESHOLD (0.6) (both only with DM_POSTFX_COMBAT_PC=0), DM_POSTFX_COMBAT_PC (1), DM_POSTFX_UI (1), DM_POSTFX_CAMBLUR (1), DM_POSTFX_DOF (0).
 // Off by default: DM_MOD_POSTEFFECTS=1 turns the callbacks on (the launcher's Mods > Post Effects switch, or env.txt). The gates are always in the code and pass through while it is off.
 #include "dm.h"
 #include "hle_mods_gen.h"
@@ -94,7 +95,8 @@ static float s_v1_intensity = 0.25f, s_v1_threshold = 1.0f, s_v1_knee = 0.5f, s_
 static float s_combat_intensity = 0.25f, s_combat_threshold = 0.6f;
 static uint8_t s_v1_antiflicker;
 static float s_v2_intensity = 1.0f, s_v2_threshold = 1.0f, s_v2_knee = 0.5f, s_v2_diffusion = 7.0f, s_v2_clamp = 65472.0f;
-static int s_v1_on = 1, s_v2_on = 0, s_v1_force = 0, s_story_on = 1, s_combat_on = 1, s_combat_mask = 25, s_ui_on = 1, s_cam_on = 1, s_dof_on = 0;
+static int s_v1_on = 1, s_v2_on = 0, s_v1_force = 0, s_story_on = 1, s_combat_on = 1, s_combat_mask = 25, s_ui_on = 1, s_cam_on = 1, s_dof_on = 0, s_combat_pc = 1;
+static volatile int s_pc_combat_active;
 
 static float env_float(const char *name, float def) {
     const char *v = getenv(name);
@@ -130,9 +132,10 @@ static int mod_enabled(void) {
         s_ui_on = env_float("DM_POSTFX_UI", 1) != 0;
         s_cam_on = env_float("DM_POSTFX_CAMBLUR", 1) != 0;
         s_dof_on = env_float("DM_POSTFX_DOF", 0) != 0;
-        LOG("[mod post-effects] %s (DM_MOD_POSTEFFECTS=%s) v1 %s%s (intensity %.2f threshold %.2f knee %.2f radius %.2f) v2 %s (intensity %.2f threshold %.2f knee %.2f diffusion %.1f clamp %.0f) story %s combat %s (mask %d) ui %s cam-blur %s dof-force %s",
+        s_combat_pc = env_float("DM_POSTFX_COMBAT_PC", 1) != 0;
+        LOG("[mod post-effects] %s (DM_MOD_POSTEFFECTS=%s) v1 %s%s (intensity %.2f threshold %.2f knee %.2f radius %.2f) v2 %s (intensity %.2f threshold %.2f knee %.2f diffusion %.1f clamp %.0f) story %s combat %s (mask %d, game values %s) ui %s cam-blur %s dof-force %s",
             on ? "on" : "off", v ? v : "unset", s_v1_on ? "on" : "off", s_v1_force ? " forced" : "", s_v1_intensity, s_v1_threshold, s_v1_knee, s_v1_radius,
-            s_v2_on ? "on" : "off", s_v2_intensity, s_v2_threshold, s_v2_knee, s_v2_diffusion, s_v2_clamp, s_story_on ? "on" : "off", s_combat_on ? "on" : "off", s_combat_mask, s_ui_on ? "on" : "off", s_cam_on ? "on" : "off", s_dof_on ? "on" : "off");
+            s_v2_on ? "on" : "off", s_v2_intensity, s_v2_threshold, s_v2_knee, s_v2_diffusion, s_v2_clamp, s_story_on ? "on" : "off", s_combat_on ? "on" : "off", s_combat_mask, s_combat_pc ? "on" : "off", s_ui_on ? "on" : "off", s_cam_on ? "on" : "off", s_dof_on ? "on" : "off");
     }
     return on;
 }
@@ -244,6 +247,7 @@ static void on_bloom_pre(uint64_t *r, int p) {
         LOG("[mod post-effects] v1 behaviour #%d first seen at OnPreCull #%d frame %llu: %p camera %p profile %p bloom model %p enabled %d intensity %.3f threshold %.3f knee %.3f radius %.3f antiflicker %d",
             nseen, hits, (unsigned long long)dm_nvn_frame_count(), (const void *)ppb, (const void *)ptr(ppb, F_PPB_CAMERA), (const void *)profile, (void *)bloom, was_on, was_i, was_t, f32(bloom, F_V1_KNEE), f32(bloom, F_V1_RADIUS), bloom[F_V1_ANTIFLICKER]);
     if (is_new) log_models(ppb, profile);
+    if (s_pc_combat_active) return;
     if (!s_v1_on) return;
     if (!was_on || s_v1_force) {
         *(float *)(bloom + F_V1_INTENSITY) = s_v1_intensity;
@@ -438,7 +442,9 @@ static void story_post_run(uint64_t *r, int p) {
 }
 
 static void on_story_post(uint64_t *r, int p) {
-    if (mod_enabled() && s_story_on) dm_mod_gate_run(r, p, story_post_run);
+    if (!mod_enabled()) return;
+    s_pc_combat_active = 0;
+    if (s_story_on) dm_mod_gate_run(r, p, story_post_run);
 }
 
 static void combat_post_run(uint64_t *r, int p) {
@@ -518,7 +524,18 @@ static void on_ui_platform(uint64_t *r, int p) {
 }
 
 static void on_cam_platform(uint64_t *r, int p) {
-    if (!mod_enabled() || !s_cam_on) return;
+    if (!mod_enabled()) return;
+    if (p == 3) {
+        if (!s_combat_on || !s_combat_pc) return;
+        if ((uint32_t)r[8] != 4u) return;
+        r[8] = 2;
+        s_pc_combat_active = 1;
+        static int combat_hits;
+        if (combat_hits++ < 16)
+            LOG("[mod post-effects] combat: ResetCamSetting Switch platform check passed as Steam, the five camera behaviours stay enabled with the game's own bloom values, frame %llu", (unsigned long long)dm_nvn_frame_count());
+        return;
+    }
+    if (!s_cam_on) return;
     if ((uint32_t)r[8] != 4u) return;
     r[8] = 2;
     static int hits;
