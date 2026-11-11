@@ -1,13 +1,33 @@
 {
   "id": "post-effects",
-  "title": "Post Effects (Library of Ruina)",
-  "description": "Turns bloom back on in the Switch version. Host callbacks switch the bloom of the game's v1 camera stack (UnityEngine.PostProcessing, OnPreCull) on with the game's own settings (intensity 0.25, threshold 1.0), optionally switch the bloom of the v2 stack (UnityEngine.Rendering.PostProcessing, Bloom.IsEnabledAndSupported) on with DM_POSTFX_V2=1, and, in combat, pass the Switch platform check of BattleCamManager.ResetCamSetting as another platform so the five camera behaviours it would disable stay enabled as on PC with the bloom values the game gave them, except that a threshold above 0.9 (DM_POSTFX_COMBAT_MAXTHRESHOLD) is lowered to it because the game's 1.1 is never reached (DM_POSTFX_COMBAT_PC=0 gives the older path back: the kept behaviours get a lower threshold, 0.6, and intensity 0.25), and pass the five Switch platform checks of UIController (CallUIPhase, CallUIPhaseAsynchronous, SetBloomeIntensity, SetBloomThreshold, SetBloomSoftKnee) as another platform so the bloom of the UI's PostProcessVolume runs in the menus and the combat UI as on PC, and log which of the game's bloom sources (v1, v2, RFX4_Bloom, RFX4_DistortionAndBloom, CameraFilterPack_Blur_Bloom) run and with what settings. The three BattleCamManager Switch checks (BlurBackgroundCam, BlurCharacterCam, VignetteCharacterCam) are passed as another platform so the PC blur and vignette run, and the models each v1 behaviour has switched on are logged.",
+  "title": "RestoreFX",
+  "description": "Restores visual effects the NX version of the game disables. Performance heavy.",
   "launcher": {
     "env": "DM_MOD_POSTEFFECTS",
     "category": "Quality of Life",
-    "label": "Post Effects (Bloom)",
-    "note": "Brings back the bloom the Switch version leaves out. May cost some fps."
+    "label": "RestoreFX",
+    "note": "Restores visual effects the NX version of the game disables. Performance heavy."
   },
+  "settings": [
+    {
+      "env": "DM_POSTFX_BLOOM",
+      "kind": "toggle",
+      "on": "1",
+      "off": "0",
+      "label": "Enable Bloom",
+      "note": "Bloom in combat, stories and the combat UI.",
+      "default": "1"
+    },
+    {
+      "env": "DM_POSTFX_DOF",
+      "kind": "toggle",
+      "on": "1",
+      "off": "0",
+      "label": "Enable Depth of Field",
+      "note": "The background and character blur of combat.",
+      "default": "1"
+    }
+  ],
   "game": "Library of Ruina 1.0.3",
   "gates": [
     "bloom_pre",

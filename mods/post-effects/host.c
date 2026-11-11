@@ -1,4 +1,4 @@
-// Mod "post-effects", host half: brings back the bloom the Switch version leaves out, and logs which of the game's bloom sources are alive.
+// Mod "post-effects" (RestoreFX in the launcher), host half: brings back the bloom and depth of field the Switch version leaves out, and logs which of the game's bloom sources are alive.
 // The game has five: the v1 camera stack (UnityEngine.PostProcessing.PostProcessingBehaviour, BloomModel), the v2 stack (UnityEngine.Rendering.PostProcessing.PostProcessLayer, Bloom settings), the KriptoFX
 // effects Bloom_RFX4 and RFX4_DistortionAndBloom, and CameraFilterPack_Blur_Bloom. The shaders of all of them are in the Switch build, so what the Switch build leaves out is data (which components its cameras carry, their settings).
 //   bloom_pre     PostProcessingBehaviour.OnPreCull, before mov x19,x0 (x0 = the behaviour): profile = *(this+0x18), bloom model = *(profile+0x58); a disabled model gets m_Enabled = 1 and the v1 settings below,
@@ -28,8 +28,8 @@
 //                 param 14 logs the first render of each v1 behaviour, then every power of ten ... (is it ever rendered, and through which camera);
 //                 params 1 and 13 also log the caller and a frame pointer backtrace (main+offset) for the first 8 calls on a behaviour that has no camera yet (m_Camera is set by its first OnPreCull)
 // Documents/env.txt can change the values: v1 DM_POSTFX_BLOOM_INTENSITY (0.25), _THRESHOLD (1.0), _KNEE (0.5), _RADIUS (7.0), _ANTIFLICKER (0), DM_POSTFX_V1_FORCE (0); v2 DM_POSTFX_V2_INTENSITY (1.0), _THRESHOLD (1.0), _KNEE (0.5),
-//   _DIFFUSION (7.0), _CLAMP (65472.0); DM_POSTFX_V1=0 turns the v1 force off, DM_POSTFX_V2=1 turns the v2 force on, DM_POSTFX_STORY (1), DM_POSTFX_COMBAT (1), DM_POSTFX_COMBAT_MASK (25), DM_POSTFX_COMBAT_INTENSITY (0.25), DM_POSTFX_COMBAT_THRESHOLD (0.6) (both only with DM_POSTFX_COMBAT_PC=0), DM_POSTFX_COMBAT_PC (1), DM_POSTFX_UI (1), DM_POSTFX_CAMBLUR (1), DM_POSTFX_DOF (0).
-// Off by default: DM_MOD_POSTEFFECTS=1 turns the callbacks on (the launcher's Mods > Post Effects switch, or env.txt). The gates are always in the code and pass through while it is off.
+//   _DIFFUSION (7.0), _CLAMP (65472.0); DM_POSTFX_V1=0 turns the v1 force off, DM_POSTFX_V2=1 turns the v2 force on, DM_POSTFX_STORY (1), DM_POSTFX_COMBAT (1), DM_POSTFX_COMBAT_MASK (25), DM_POSTFX_COMBAT_INTENSITY (0.25), DM_POSTFX_COMBAT_THRESHOLD (0.6) (both only with DM_POSTFX_COMBAT_PC=0), DM_POSTFX_COMBAT_PC (1), DM_POSTFX_UI (1), DM_POSTFX_CAMBLUR (1), DM_POSTFX_BLOOM (1; 0 leaves every bloom of the game as the Switch build has it and switches the combat bloom models off), DM_POSTFX_DOF (1; 0 keeps BlurBackgroundCam and BlurCharacterCam on the Switch path and switches the depthOfField model of the combat behaviours off).
+// Off by default: DM_MOD_POSTEFFECTS=1 turns the callbacks on (the launcher's Mods > RestoreFX switch, or env.txt). The gates are always in the code and pass through while it is off.
 #include "dm.h"
 #include "hle_mods_gen.h"
 
@@ -95,7 +95,7 @@ static float s_v1_intensity = 0.25f, s_v1_threshold = 1.0f, s_v1_knee = 0.5f, s_
 static float s_combat_intensity = 0.25f, s_combat_threshold = 0.6f;
 static uint8_t s_v1_antiflicker;
 static float s_v2_intensity = 1.0f, s_v2_threshold = 1.0f, s_v2_knee = 0.5f, s_v2_diffusion = 7.0f, s_v2_clamp = 65472.0f;
-static int s_v1_on = 1, s_v2_on = 0, s_v1_force = 0, s_story_on = 1, s_combat_on = 1, s_combat_mask = 25, s_ui_on = 1, s_cam_on = 1, s_dof_on = 0, s_combat_pc = 1;
+static int s_v1_on = 1, s_v2_on = 0, s_v1_force = 0, s_story_on = 1, s_combat_on = 1, s_combat_mask = 25, s_ui_on = 1, s_cam_on = 1, s_dof_on = 1, s_bloom_on = 1, s_combat_pc = 1;
 static volatile int s_pc_combat_active;
 static float s_combat_max_threshold = 0.9f;
 
@@ -132,12 +132,14 @@ static int mod_enabled(void) {
         s_combat_mask = (int)env_float("DM_POSTFX_COMBAT_MASK", 25);
         s_ui_on = env_float("DM_POSTFX_UI", 1) != 0;
         s_cam_on = env_float("DM_POSTFX_CAMBLUR", 1) != 0;
-        s_dof_on = env_float("DM_POSTFX_DOF", 0) != 0;
+        s_dof_on = env_float("DM_POSTFX_DOF", 1) != 0;
+        s_bloom_on = env_float("DM_POSTFX_BLOOM", 1) != 0;
+        if (!s_bloom_on) s_v1_on = s_story_on = s_ui_on = 0;
         s_combat_pc = env_float("DM_POSTFX_COMBAT_PC", 1) != 0;
         s_combat_max_threshold = env_float("DM_POSTFX_COMBAT_MAXTHRESHOLD", s_combat_max_threshold);
-        LOG("[mod post-effects] %s (DM_MOD_POSTEFFECTS=%s) v1 %s%s (intensity %.2f threshold %.2f knee %.2f radius %.2f) v2 %s (intensity %.2f threshold %.2f knee %.2f diffusion %.1f clamp %.0f) story %s combat %s (mask %d, game values %s) ui %s cam-blur %s dof-force %s",
+        LOG("[mod post-effects] %s (DM_MOD_POSTEFFECTS=%s) v1 %s%s (intensity %.2f threshold %.2f knee %.2f radius %.2f) v2 %s (intensity %.2f threshold %.2f knee %.2f diffusion %.1f clamp %.0f) story %s combat %s (mask %d, game values %s) ui %s cam-blur %s dof %s bloom %s",
             on ? "on" : "off", v ? v : "unset", s_v1_on ? "on" : "off", s_v1_force ? " forced" : "", s_v1_intensity, s_v1_threshold, s_v1_knee, s_v1_radius,
-            s_v2_on ? "on" : "off", s_v2_intensity, s_v2_threshold, s_v2_knee, s_v2_diffusion, s_v2_clamp, s_story_on ? "on" : "off", s_combat_on ? "on" : "off", s_combat_mask, s_combat_pc ? "on" : "off", s_ui_on ? "on" : "off", s_cam_on ? "on" : "off", s_dof_on ? "on" : "off");
+            s_v2_on ? "on" : "off", s_v2_intensity, s_v2_threshold, s_v2_knee, s_v2_diffusion, s_v2_clamp, s_story_on ? "on" : "off", s_combat_on ? "on" : "off", s_combat_mask, s_combat_pc ? "on" : "off", s_ui_on ? "on" : "off", s_cam_on ? "on" : "off", s_dof_on ? "on" : "off", s_bloom_on ? "on" : "off");
     }
     return on;
 }
@@ -250,7 +252,12 @@ static void on_bloom_pre(uint64_t *r, int p) {
             nseen, hits, (unsigned long long)dm_nvn_frame_count(), (const void *)ppb, (const void *)ptr(ppb, F_PPB_CAMERA), (const void *)profile, (void *)bloom, was_on, was_i, was_t, f32(bloom, F_V1_KNEE), f32(bloom, F_V1_RADIUS), bloom[F_V1_ANTIFLICKER]);
     if (is_new) log_models(ppb, profile);
     if (s_pc_combat_active) {
-        if (was_on && was_t > s_combat_max_threshold) {
+        if (!s_dof_on) {
+            uint8_t *dof = (uint8_t *)ptr(profile, F_PROFILE_DOF);
+            if (dof) dof[F_MODEL_ENABLED] = 0;
+        }
+        if (!s_bloom_on) bloom[F_MODEL_ENABLED] = 0;
+        else if (was_on && was_t > s_combat_max_threshold) {
             *(float *)(bloom + F_V1_THRESHOLD) = s_combat_max_threshold;
             if (is_new)
                 LOG("[mod post-effects] combat: behaviour %p bloom threshold %.3f -> %.3f (a threshold above 1 is never reached by an 8-bit scene)", (const void *)ppb, was_t, s_combat_max_threshold);
@@ -544,7 +551,7 @@ static void on_cam_platform(uint64_t *r, int p) {
             LOG("[mod post-effects] combat: ResetCamSetting Switch platform check passed as Steam, the five camera behaviours stay enabled with the game's own bloom values, frame %llu", (unsigned long long)dm_nvn_frame_count());
         return;
     }
-    if (!s_cam_on) return;
+    if (!s_cam_on || (p < 2 && !s_dof_on)) return;
     if ((uint32_t)r[8] != 4u) return;
     r[8] = 2;
     static int hits;
