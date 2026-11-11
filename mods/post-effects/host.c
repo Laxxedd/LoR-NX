@@ -9,7 +9,8 @@
 //                 The game only switches it on for the "Paper" filter, so the stories that do not use it render without the v1 bloom (the 60% of stories without bloom); DM_POSTFX_STORY=0 turns this off
 //   combat_keep   BattleCamManager.ResetCamSetting, the `mov x2, xzr` before each of its five `bl Behaviour.set_enabled(false)` calls (param 0-4: _bgCamTransform, _fgCamTransform, _mainCam, _characterCam, _effectCam; w1 = 0 is already set, x0 = the component
 //                 found on that camera): when it is a PostProcessingBehaviour (v1 stack), the camera's bit is set in DM_POSTFX_COMBAT_MASK (default 25: _bgCamTransform, _characterCam and _effectCam; 31 is all five) and, with DM_POSTFX_V1=0, its bloom model is on (a behaviour with nothing to draw only costs a full-screen pass), w1 becomes 1, so the game's reset leaves the combat bloom behaviours enabled
-//                 and bloom_pre then forces their bloom on; DM_POSTFX_COMBAT=0 turns this off; each behaviour it sees is remembered for combat_post
+//                 and bloom_pre then sets their bloom to DM_POSTFX_COMBAT_INTENSITY (0.25) and DM_POSTFX_COMBAT_THRESHOLD (0.6): the game's own threshold of 1.1 on these cameras cannot be exceeded without HDR, so no combat bloom shows with it;
+//                 DM_POSTFX_COMBAT=0 turns this off; each behaviour it sees is remembered for combat_post
 //   combat_post   BattleCamManager.ResetCamSetting, the ldp x20,x19 before its return (x19 = the manager): every behaviour combat_keep remembered that is still disabled is switched on, so the combat bloom does not depend on the argument write alone
 //   ui_platform   the `cmp w8, #4` of the five `PlatformManager.PlatformType == NintentoSwitch` checks that keep the menu bloom off (param 0 UIController.CallUIPhase, 1 CallUIPhaseAsynchronous, 2 SetBloomeIntensity, 3 SetBloomThreshold, 4 SetBloomSoftKnee):
 //                 w8 = the platform type; a 4 becomes 2 so the game fetches the Bloom of its UI PostProcessVolume (UIController.pp_bloom, never fetched on Switch) and sets its intensity, threshold and soft knee per UI phase as on PC;
@@ -22,7 +23,7 @@
 //                 param 14 logs the first render of each v1 behaviour, then every power of ten ... (is it ever rendered, and through which camera);
 //                 params 1 and 13 also log the caller and a frame pointer backtrace (main+offset) for the first 8 calls on a behaviour that has no camera yet (m_Camera is set by its first OnPreCull)
 // Documents/env.txt can change the values: v1 DM_POSTFX_BLOOM_INTENSITY (0.25), _THRESHOLD (1.0), _KNEE (0.5), _RADIUS (7.0), _ANTIFLICKER (0), DM_POSTFX_V1_FORCE (0); v2 DM_POSTFX_V2_INTENSITY (1.0), _THRESHOLD (1.0), _KNEE (0.5),
-//   _DIFFUSION (7.0), _CLAMP (65472.0); DM_POSTFX_V1=0 turns the v1 force off, DM_POSTFX_V2=1 turns the v2 force on, DM_POSTFX_STORY (1), DM_POSTFX_COMBAT (1), DM_POSTFX_COMBAT_MASK (25), DM_POSTFX_UI (1).
+//   _DIFFUSION (7.0), _CLAMP (65472.0); DM_POSTFX_V1=0 turns the v1 force off, DM_POSTFX_V2=1 turns the v2 force on, DM_POSTFX_STORY (1), DM_POSTFX_COMBAT (1), DM_POSTFX_COMBAT_MASK (25), DM_POSTFX_COMBAT_INTENSITY (0.25), DM_POSTFX_COMBAT_THRESHOLD (0.6), DM_POSTFX_UI (1).
 // Off by default: DM_MOD_POSTEFFECTS=1 turns the callbacks on (the launcher's Mods > Post Effects switch, or env.txt). The gates are always in the code and pass through while it is off.
 #include "dm.h"
 #include "hle_mods_gen.h"
@@ -80,6 +81,7 @@ void dm_mod_gate_run(uint64_t *regs, int param, void (*fn)(uint64_t *, int));
 #define F_STRING_CHARS 0x14
 
 static float s_v1_intensity = 0.25f, s_v1_threshold = 1.0f, s_v1_knee = 0.5f, s_v1_radius = 7.0f;
+static float s_combat_intensity = 0.25f, s_combat_threshold = 0.6f;
 static uint8_t s_v1_antiflicker;
 static float s_v2_intensity = 1.0f, s_v2_threshold = 1.0f, s_v2_knee = 0.5f, s_v2_diffusion = 7.0f, s_v2_clamp = 65472.0f;
 static int s_v1_on = 1, s_v2_on = 0, s_v1_force = 0, s_story_on = 1, s_combat_on = 1, s_combat_mask = 25, s_ui_on = 1;
@@ -102,6 +104,8 @@ static int mod_enabled(void) {
         s_v1_knee = env_float("DM_POSTFX_BLOOM_KNEE", s_v1_knee);
         s_v1_radius = env_float("DM_POSTFX_BLOOM_RADIUS", s_v1_radius);
         s_v1_antiflicker = (uint8_t)(env_float("DM_POSTFX_BLOOM_ANTIFLICKER", 0) != 0);
+        s_combat_intensity = env_float("DM_POSTFX_COMBAT_INTENSITY", s_combat_intensity);
+        s_combat_threshold = env_float("DM_POSTFX_COMBAT_THRESHOLD", s_combat_threshold);
         s_v2_intensity = env_float("DM_POSTFX_V2_INTENSITY", s_v2_intensity);
         s_v2_threshold = env_float("DM_POSTFX_V2_THRESHOLD", s_v2_threshold);
         s_v2_knee = env_float("DM_POSTFX_V2_KNEE", s_v2_knee);
@@ -169,6 +173,21 @@ static void string_ascii(const uint8_t *str, char *out, int cap) {
     out[n] = 0;
 }
 
+static const uint8_t *s_combat_set[16];
+static int s_combat_set_next;
+
+static int combat_registered(const uint8_t *ppb) {
+    for (int i = 0; i < 16; i++)
+        if (s_combat_set[i] == ppb) return 1;
+    return 0;
+}
+
+static void combat_register(const uint8_t *ppb) {
+    if (combat_registered(ppb)) return;
+    s_combat_set[s_combat_set_next] = ppb;
+    s_combat_set_next = (s_combat_set_next + 1) % 16;
+}
+
 static void on_bloom_pre(uint64_t *r, int p) {
     (void)p;
     if (!mod_enabled()) return;
@@ -207,6 +226,11 @@ static void on_bloom_pre(uint64_t *r, int p) {
     } else if (!(was_i > 0.0f)) {
         *(float *)(bloom + F_V1_INTENSITY) = s_v1_intensity;
     }
+    if (s_combat_on && combat_registered(ppb)) {
+        bloom[F_MODEL_ENABLED] = 1;
+        *(float *)(bloom + F_V1_INTENSITY) = s_combat_intensity;
+        *(float *)(bloom + F_V1_THRESHOLD) = s_combat_threshold;
+    }
     if (log_it)
         LOG("[mod post-effects] v1 OnPreCull #%d: bloom model %p (profile %p) enabled %d intensity %.3f threshold %.3f -> enabled %d intensity %.3f",
             hits, (void *)bloom, (const void *)profile, was_on, was_i, was_t, bloom[F_MODEL_ENABLED], f32(bloom, F_V1_INTENSITY));
@@ -228,6 +252,7 @@ static void on_combat_keep(uint64_t *r, int p) {
     if (!name || strcmp(name, "PostProcessingBehaviour") || !(s_combat_mask >> p & 1)) return;
     if (!s_v1_on && !bloom_model_on(o)) return;
     if (p >= 0 && p < 5) s_combat_ppb[p] = (uint8_t *)(uintptr_t)o;
+    combat_register(o);
     r[1] = 1;
     static int hits;
     if (hits++ < 32)
