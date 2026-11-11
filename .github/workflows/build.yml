@@ -72,7 +72,7 @@ jobs:
       - name: Normalize tool timestamps
         run: |
           set -eo pipefail
-          find dm/gfx/tools -type f -exec touch -h -d "2020-01-01T00:00:00Z" {} +
+          find dm/gfx  ools -type f -exec touch -h -d "2020-01-01T00:00:00Z" {} +
 
       - name: Toolchain
         run: |
@@ -169,7 +169,7 @@ jobs:
       - name: Resolve download links
         id: links
         env:
-          ALL_SECRETS: ${{ toJSON(secrets) }}- name: Download game files
+        ALL_SECRETS: ${{ toJSON(secrets) }}- name: Download game files
         if: ${{ steps.cache.outputs.cache-hit != 'true' }}
         run: |
           set -eo pipefail
@@ -341,7 +341,7 @@ jobs:
           set -eo pipefail
           for img in "$HOME"/work/extract/*/RomFS.img; do
             echo "$img"
-            python3 -I dm/tools/romfs_image.py --identity "$img"
+            python3 -I dm  ools/romfs_image.py --identity "$img"
           done
 
       - name: Package output
@@ -382,7 +382,7 @@ jobs:
           compression-level: 0
           retention-days: 3
 
-      # The shader libraries a headless build leaves out of the IPA (dm/tools/msl_id.py staged them: msl.id and the b-<chain> folder; the 7z, when encrypted, holds that folder as msl).
+      # The shader libraries a headless build leaves out of the IPA (dm  ools/msl_id.py staged them: msl.id and the b-<chain> folder; the 7z, when encrypted, holds that folder as msl).
       # Unzip into a folder named msl and copy it to the app's Documents (Files app), or scripts/push_shaders.sh; the app uses it only when its msl.id is the one the IPA was built with
       - name: Shader libraries for Documents/msl
         if: ${{ success() && (inputs.shader_mode || 'headless') == 'headless' }}
