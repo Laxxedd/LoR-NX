@@ -165,11 +165,50 @@ jobs:
           # Not ASTCENC_DIR: that name is the host Makefile's, and the NSP script's Mac host build would then try to link this iOS library into a Mac binary. build_ipa.sh reads this one.
           echo "DM_IOS_ASTCENC_DIR=$HOME/astcenc" >> "$GITHUB_ENV"
           ls -lh "$HOME/astcenc/lib"
-
-      - name: Resolve download links
+- name: Resolve download links
         id: links
         env:
-        ALL_SECRETS: ${{ toJSON(secrets) }}
+          ALL_SECRETS: ${{ toJSON(secrets) }}
+        run: |
+          set -eo pipefail
+          python3 - <<'PY' > "$RUNNER_TEMP/links.tsv"
+          import json, os, re, sys, urllib.parse
+          secrets = json.loads(os.environ["ALL_SECRETS"])
+          found = []
+          for key, val in secrets.items():
+              m = re.fullmatch(r"NSP_URL_(\d+)", key, re.I)
+              if m and val.strip():
+                  found.append((int(m.group(1)), val.strip()))
+          if not found:
+              sys.exit("No NSP_URL_1, NSP_URL_2, ... secrets found")
+          exts = (".nsp", ".xci", ".nsz", ".xcz")
+          for n, link in sorted(found):
+              url, frag = urllib.parse.urldefrag(link)
+              name = urllib.parse.unquote(frag) if frag else urllib.parse.unquote(urllib.parse.urlparse(url).path.rsplit("/", 1)[-1])
+              name = name.replace("/", "_")
+              host = urllib.parse.urlparse(url).netloc.lower()
+              if host.endswith(("drive.google.com", "docs.google.com")) and not frag:
+                  name = "-"   # Google Drive: keep the file's own name from Drive
+              elif not name.lower().endswith(exts):
+                  name = f"download_{n}.nsp"
+              print(f"{n}\t{url}\t{name}")
+          PY
+          # the cache key: a hash of the links, so changing a link downloads fresh files
+          echo "hash=$(shasum -a 256 "$RUNNER_TEMP/links.tsv" | cut -c1-32)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore cached game files
+        id: cache
+        if: ${{ !inputs.refresh_cache }}
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/game
+          key: nxgame-${{ steps.links.outputs.hash }}
+
+      - name: Download game files
+        if: ${{ steps.cache.outputs.cache-hit != 'true' }}
+        run: |
+          set -eo pipefail
+          GAME_DIR="$HOME/game"
       - name: Download game files
         if: ${{ steps.cache.outputs.cache-hit != 'true' }}
         run: |
