@@ -169,7 +169,8 @@ jobs:
       - name: Resolve download links
         id: links
         env:
-        ALL_SECRETS: ${{ toJSON(secrets) }}- name: Download game files
+        ALL_SECRETS: ${{ toJSON(secrets) }}
+      - name: Download game files
         if: ${{ steps.cache.outputs.cache-hit != 'true' }}
         run: |
           set -eo pipefail
