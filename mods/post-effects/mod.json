@@ -1,7 +1,7 @@
 {
   "id": "post-effects",
   "title": "Post Effects (Library of Ruina)",
-  "description": "Turns bloom back on in the Switch version. Host callbacks switch the bloom of the game's v1 camera stack (UnityEngine.PostProcessing, OnPreCull) on with the game's own settings (intensity 0.25, threshold 1.0), optionally switch the bloom of the v2 stack (UnityEngine.Rendering.PostProcessing, Bloom.IsEnabledAndSupported) on with DM_POSTFX_V2=1, and, in combat, set the bloom of the behaviours it keeps to a lower threshold (0.6, the game's 1.1 shows no bloom without HDR) and intensity 0.25, and, switch the v1 behaviours back on after BattleCamManager.ResetCamSetting disables them before their first render, and keep the v1 behaviours that BattleCamManager.ResetCamSetting would disable in combat enabled, and pass the five Switch platform checks of UIController (CallUIPhase, CallUIPhaseAsynchronous, SetBloomeIntensity, SetBloomThreshold, SetBloomSoftKnee) as another platform so the bloom of the UI's PostProcessVolume runs in the menus and the combat UI as on PC, and log which of the game's bloom sources (v1, v2, RFX4_Bloom, RFX4_DistortionAndBloom, CameraFilterPack_Blur_Bloom) run and with what settings.",
+  "description": "Turns bloom back on in the Switch version. Host callbacks switch the bloom of the game's v1 camera stack (UnityEngine.PostProcessing, OnPreCull) on with the game's own settings (intensity 0.25, threshold 1.0), optionally switch the bloom of the v2 stack (UnityEngine.Rendering.PostProcessing, Bloom.IsEnabledAndSupported) on with DM_POSTFX_V2=1, and, in combat, set the bloom of the behaviours it keeps to a lower threshold (0.6, the game's 1.1 shows no bloom without HDR) and intensity 0.25, and, switch the v1 behaviours back on after BattleCamManager.ResetCamSetting disables them before their first render, and keep the v1 behaviours that BattleCamManager.ResetCamSetting would disable in combat enabled, and pass the five Switch platform checks of UIController (CallUIPhase, CallUIPhaseAsynchronous, SetBloomeIntensity, SetBloomThreshold, SetBloomSoftKnee) as another platform so the bloom of the UI's PostProcessVolume runs in the menus and the combat UI as on PC, and log which of the game's bloom sources (v1, v2, RFX4_Bloom, RFX4_DistortionAndBloom, CameraFilterPack_Blur_Bloom) run and with what settings. The three BattleCamManager Switch checks (BlurBackgroundCam, BlurCharacterCam, VignetteCharacterCam) are passed as another platform so the PC blur and vignette run, and the models each v1 behaviour has switched on are logged.",
   "launcher": {
     "env": "DM_MOD_POSTEFFECTS",
     "category": "Quality of Life",
@@ -14,6 +14,7 @@
     "bloom2_force",
     "ui_platform",
     "story_post",
+    "cam_platform",
     "probe",
     "combat_keep",
     "combat_post"
@@ -67,6 +68,27 @@
         "offset": "0x16ffaf8",
         "word": "7100111f",
         "reason": "UIController.SetBloomSoftKnee, cmp w8,#4 after ldr w8,[x0,#0x34] (PlatformManager.PlatformType == NintentoSwitch): w8 = the platform type (a write to x8 reaches the cmp)"
+      },
+      {
+        "gate": "cam_platform",
+        "param": 0,
+        "offset": "0x2b41a04",
+        "word": "7100111f",
+        "reason": "BattleCamManager.BlurBackgroundCam, cmp w8,#4 after ldr w8,[x0,#0x34] (PlatformManager.PlatformType == NintentoSwitch): w8 = the platform type (a write to x8 reaches the cmp)"
+      },
+      {
+        "gate": "cam_platform",
+        "param": 1,
+        "offset": "0x2b40a54",
+        "word": "7100111f",
+        "reason": "BattleCamManager.BlurCharacterCam, cmp w8,#4 after ldr w8,[x0,#0x34] (PlatformManager.PlatformType == NintentoSwitch): w8 = the platform type (a write to x8 reaches the cmp)"
+      },
+      {
+        "gate": "cam_platform",
+        "param": 2,
+        "offset": "0x2b40b78",
+        "word": "7100111f",
+        "reason": "BattleCamManager.VignetteCharacterCam, cmp w8,#4 after ldr w8,[x0,#0x34] (PlatformManager.PlatformType == NintentoSwitch): w8 = the platform type (a write to x8 reaches the cmp)"
       },
       {
         "gate": "story_post",
