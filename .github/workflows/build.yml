@@ -213,6 +213,366 @@ jobs:
           rm -rf "$GAME_DIR"
           mkdir -p "$GAME_DIR"
           while IFS=$'\t' read -r n url name; do
+            echo "Downloading #$n: $name"
+            case "$url" in
+              *drive.google.com*|*docs.google.com*)
+                id=$(echo "$url" | sed -nE 's#.*/d/([A-Za-z0-9_-]+).*#\1#p; s#.*[?&]id=([A-Za-z0-9_-]+).*#\1#p' | head -1)
+                if [ -z "$id" ]; then echo "::error::Can't find the file ID in link #$n"; exit 1; fi
+                echo "::add-mask::$id"
+                if [ "$name" = "-" ]; then out="$GAME_DIR/"; else out="$GAME_DIR/$name"; fi
+                gdown -q "$id" -O "$out" ;;
+              *)
+                curl -fsSL --retry 5 --retry-delay 10 --retry-all-errors -C - -o "$GAME_DIR/$name" "$url" ;;
+            esac
+          done < "$RUNNER_TEMP/links.tsv"
+
+      - name: Save game files to the cache
+        if: ${{ steps.cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ~/game
+          key: nxgame-${{ steps.links.outputs.hash }}
+
+      - name: List game files
+        run: |
+          ls -lh "$HOME/game"
+          df -h /
+
+      - name: Get prod.keys
+        env:
+          KEYS_RAW: ${{ secrets.PROD_KEYS }}
+          KEYS_B64: ${{ secrets.PROD_KEYS_B64 }}
+          KEYS_URL: ${{ secrets.PROD_KEYS_URL }}
+        run: |
+          set -eo pipefail
+          out="$RUNNER_TEMP/prod.keys"
+          if [ -z "$KEYS_RAW" ] && [ -z "$KEYS_B64" ] && [ -n "$KEYS_URL" ]; then
+            curl -fsSL --retry 5 --retry-all-errors -o "$out" "$KEYS_URL"
+          else
+            python3 - "$out" <<'PY'
+          import base64, os, re, sys
+          raw = os.environ.get("KEYS_RAW", "").strip()
+          b64 = os.environ.get("KEYS_B64", "").strip()
+          if not raw and not b64:
+              sys.exit("Set one secret: PROD_KEYS (the file's text), PROD_KEYS_B64 or PROD_KEYS_URL")
+          if raw or "master_key_00" in b64 or "header_key" in b64:
+              data = (raw or b64).replace("\r\n", "\n").encode()   # the file's text was pasted as it is
+          else:
+              # tolerant base64: drops certutil's BEGIN/END lines, whitespace and quotes, accepts the URL-safe alphabet
+              t = "\n".join(l for l in b64.splitlines() if not l.startswith("-----"))
+              t = re.sub(r"[^A-Za-z0-9+/_=-]", "", t).replace("-", "+").replace("_", "/").rstrip("=")
+              t += "=" * (-len(t) % 4)
+              data = base64.b64decode(t)
+          if not data.endswith(b"\n"):
+              data += b"\n"
+          if b"master_key" not in data:
+              sys.exit(f"The decoded keys ({len(data)} bytes) don't look like a prod.keys file; check the secret")
+          open(sys.argv[1], "wb").write(data)
+          PY
+          fi
+          test -s "$out"
+          echo "prod.keys: $(wc -c < "$out") bytes, $(wc -l < "$out") lines"
+
+      - name: Restore shader cache
+        id: shcache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/work/shader
+          key: nxshader-v1-${{ steps.links.outputs.hash }}-${{ hashFiles('dm/gfx/**', 'dm/games/**', 'scripts/build_ipa_from_nsp.py') }}
+          restore-keys: |
+            nxshader-v1-${{ steps.links.outputs.hash }}-
+
+      - name: Set version
+        env:
+          VERSION_INPUT: ${{ inputs.version }}
+        run: |
+          set -eo pipefail
+          version=$(python3 scripts/version.py apply "$VERSION_INPUT")
+          echo "LoR NX v$version"
+          echo "LoR NX v$version" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Apply mods
+        run: python3 scripts/apply_mods.py --out "$HOME/mods"
+
+      - name: Build IPA
+        env:
+          APP_NAME: ${{ inputs.app_name || 'Library of Ruina' }}
+          EXTRA_ARGS: ${{ inputs.extra_args }}
+          ROMFS_MODE: ${{ inputs.romfs_mode || 'headless' }}
+          SHADER_MODE: ${{ inputs.shader_mode || 'headless' }}
+        run: |
+          set -eo pipefail
+          GAME_DIR="$HOME/game"
+          WORK_DIR="$HOME/work"
+          mkdir -p "$WORK_DIR"
+          ROMFS_MODE=${ROMFS_MODE:-headless}
+          if [ "$ROMFS_MODE" = headless ]; then ROMFS_MODE=separate; fi
+          args=("$GAME_DIR" -k "$RUNNER_TEMP/prod.keys" -o "$GAME_DIR/nxnative.ipa" --work-dir "$WORK_DIR" --keep-extracted --romfs "$ROMFS_MODE" --progress lines)
+          if [ -n "$APP_NAME" ]; then args+=(--app-name "$APP_NAME"); fi
+          if [ "$SHADER_MODE" = headless ]; then args+=(--shaders separate); fi
+          # shellcheck disable=SC2086
+          python3 scripts/build_ipa_from_nsp.py "${args[@]}" $EXTRA_ARGS
+          ls -lh "$GAME_DIR/nxnative.ipa"
+
+      - name: Check shader output
+        id: shdone
+        if: ${{ !cancelled() && steps.shcache.outputs.cache-hit != 'true' }}
+        run: |
+          if ls "$HOME"/work/shader/ios/b-*.key >/dev/null 2>&1; then echo "ready=true" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Save shader cache
+        if: ${{ !cancelled() && steps.shdone.outputs.ready == 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ~/work/shader
+          key: nxshader-v1-${{ steps.links.outputs.hash }}-${{ hashFiles('dm/gfx/**', 'dm/games/**', 'scripts/build_ipa_from_nsp.py') }}
+
+      - name: Show RomFS image identity
+        if: ${{ success() && ((inputs.romfs_mode || 'headless') == 'headless') }}
+        run: |
+          set -eo pipefail
+          for img in "$HOME"/work/extract/*/RomFS.img; do
+            echo "$img"
+            python3 -I dm/tools/romfs_image.py --identity "$img"
+          done
+
+      - name: Package output
+        env:
+          ENCRYPT: ${{ inputs.encrypt }}
+          PASS: ${{ secrets.IPA_PASSPHRASE }}
+          SHADER_MODE: ${{ inputs.shader_mode || 'headless' }}
+        run: |
+          set -eo pipefail
+          mkdir -p "$HOME/out"
+          # the shader libraries a headless build leaves out of the IPA are game-derived too: encrypted with the IPA when that is on
+          if [ "$SHADER_MODE" = headless ]; then
+            SHADERS="$HOME/work/ipa/build/ios/pkg/shaders/msl"
+            test -f "$SHADERS/msl.id"
+            if [ "$ENCRYPT" = "true" ] && [ -n "$PASS" ]; then
+              7zz a -mx=0 -mhe=on "-p$PASS" "$HOME/out/nxnative-shaders.7z" "$SHADERS"
+              echo "SHADER_OUT=$HOME/out/nxnative-shaders.7z" >> "$GITHUB_ENV"
+            else
+              echo "SHADER_OUT=$SHADERS" >> "$GITHUB_ENV"
+            fi
+          fi
+          if [ "$ENCRYPT" = "true" ]; then
+            if [ -z "$PASS" ]; then
+              echo "::error::encrypt is on but the IPA_PASSPHRASE secret is empty"
+              exit 1
+            fi
+            7zz a -mx=0 -mhe=on "-p$PASS" "$HOME/out/nxnative-ipa.7z" "$HOME/game/nxnative.ipa"
+            echo "OUT_FILE=$HOME/out/nxnative-ipa.7z" >> "$GITHUB_ENV"
+          else
+            cp "$HOME/game/nxnative.ipa" "$HOME/out/nxnative.ipa"
+            echo "OUT_FILE=$HOME/out/nxnative.ipa" >> "$GITHUB_ENV"
+          fi
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nxnative-ipa
+          path: ${{ env.OUT_FILE }}
+          compression-level: 0
+          retention-days: 3
+
+      # The shader libraries a headless build leaves out of the IPA (dm/tools/msl_id.py staged them: msl.id and the b-<chain> folder; the 7z, when encrypted, holds that folder as msl).
+      # Unzip into a folder named msl and copy it to the app's Documents (Files app), or scripts/push_shaders.sh; the app uses it only when its msl.id is the one the IPA was built with
+      - name: Shader libraries for Documents/msl
+        if: ${{ success() && (inputs.shader_mode || 'headless') == 'headless' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nxnative-shaders
+          path: ${{ env.SHADER_OUT }}
+          compression-level: 0
+          retention-days: 3
+
+      - name: Logs on failure
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: build-logs
+          path: |
+            ~/work/logs/**
+            ~/work/profile/**
+          if-no-files-found: ignore
+          retention-days: 3          - bundle
+      refresh_cache:
+        description: "Ignore cache downloads"
+        required: true
+        default: false
+        type: boolean
+      encrypt:
+        description: "Encrypt archive"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+  UPLOAD_URL: ${{ secrets.UPLOAD_URL }}
+  ASTCENC_TAG: "5.7.0"
+  ASTCENC_COMMIT: baff485b0ff36d2f95d28961605106502c653966
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: xcode-27
+    timeout-minutes: 360
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Normalize tool timestamps
+        run: |
+          set -eo pipefail
+          find dm/gfx/tools -type f -exec touch -h -d "2020-01-01T00:00:00Z" {} +
+
+      - name: Toolchain
+        run: |
+          set -eo pipefail
+          df -h /
+          if [ ! -d "$DEVELOPER_DIR" ]; then
+            echo "::error::$DEVELOPER_DIR is missing. Xcode versions on this runner:"
+            ls -d /Applications/Xcode*.app || true
+            exit 1
+          fi
+          sudo xcode-select -s "$DEVELOPER_DIR"
+          xcodebuild -version
+          sw_vers
+          xcodebuild -runFirstLaunch || true
+          if ! xcodebuild -showsdks | grep -q iphoneos; then
+            xcodebuild -downloadPlatform iOS
+          fi
+          xcodebuild -downloadComponent MetalToolchain || true
+          xcrun metal --version
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Install tools
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+        run: |
+          set -eo pipefail
+          brew install xcodegen zstd glslang sevenzip cmake
+          python3 -m pip install lz4 "capstone>=5,<6" fonttools gdown
+          # only needed for .nsz / .xcz files
+          python3 -m pip install nsz zbic || echo "::warning::nsz did not install; .nsz/.xcz files will not work"
+
+      - name: Restore astcenc
+        id: astcenc_cache
+        uses: actions/cache@v4
+        with:
+          path: ~/astcenc
+          key: astcenc-${{ env.ASTCENC_TAG }}-${{ env.ASTCENC_COMMIT }}-ios-arm64-neon-v1
+
+      - name: Build astcenc
+        if: ${{ steps.astcenc_cache.outputs.cache-hit != 'true' }}
+        run: |
+          set -eo pipefail
+          src="$RUNNER_TEMP/astc-encoder"
+          rm -rf "$src" "$HOME/astcenc"
+          git clone --quiet --depth 1 --branch "$ASTCENC_TAG" https://github.com/ARM-software/astc-encoder "$src"
+          got=$(git -C "$src" rev-parse HEAD)
+          if [ "$got" != "$ASTCENC_COMMIT" ]; then
+            echo "::error::astcenc $ASTCENC_TAG is $got, expected $ASTCENC_COMMIT"
+            exit 1
+          fi
+          cmake -S "$src" -B "$RUNNER_TEMP/astc-build" \
+            -G "Unix Makefiles" \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_SYSROOT=iphoneos \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=26.0 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DASTCENC_ISA_NEON=ON \
+            -DASTCENC_CLI=OFF \
+            -DASTCENC_SHAREDLIB=OFF \
+            -DASTCENC_UNITTEST=OFF \
+            -DASTCENC_WERROR=OFF
+          cmake --build "$RUNNER_TEMP/astc-build" --target astcenc-neon-static --parallel
+          mkdir -p "$HOME/astcenc/lib" "$HOME/astcenc/include"
+          cp "$RUNNER_TEMP/astc-build/Source/libastcenc-neon-static.a" "$HOME/astcenc/lib/libastcenc.a"
+          cp "$src/Source/astcenc.h" "$HOME/astcenc/include/astcenc.h"
+          cp "$src/LICENSE.txt" "$HOME/astcenc/LICENSE.txt"
+          echo "$ASTCENC_TAG $ASTCENC_COMMIT" > "$HOME/astcenc/VERSION"
+
+      - name: Check astcenc
+        run: |
+          set -eo pipefail
+          lib="$HOME/astcenc/lib/libastcenc.a"
+          test -s "$lib"
+          test -s "$HOME/astcenc/include/astcenc.h"
+          info=$(lipo -info "$lib")
+          echo "$info"
+          case "$info" in *arm64*) ;; *) echo "::error::libastcenc.a is not arm64"; exit 1 ;; esac
+          syms=$(nm "$lib" 2>/dev/null)
+          for fn in astcenc_context_alloc astcenc_compress_image; do
+            case "$syms" in *" T _$fn"*) ;; *) echo "::error::$fn missing from libastcenc.a"; exit 1 ;; esac
+          done
+          # Not ASTCENC_DIR: that name is the host Makefile's, and the NSP script's Mac host build would then try to link this iOS library into a Mac binary. build_ipa.sh reads this one.
+          echo "DM_IOS_ASTCENC_DIR=$HOME/astcenc" >> "$GITHUB_ENV"
+          ls -lh "$HOME/astcenc/lib"
+
+      - name: Resolve download links
+        id: links
+        env:
+          ALL_SECRETS: ${{ toJSON(secrets) }}
+        run: |
+          set -eo pipefail
+          python3 - <<'PY' > "$RUNNER_TEMP/links.tsv"
+          import json, os, re, sys, urllib.parse
+          secrets = json.loads(os.environ["ALL_SECRETS"])
+          found = []
+          for key, val in secrets.items():
+              m = re.fullmatch(r"NSP_URL_(\d+)", key, re.I)
+              if m and val.strip():
+                  found.append((int(m.group(1)), val.strip()))
+          if not found:
+              sys.exit("No NSP_URL_1, NSP_URL_2, ... secrets found")
+          exts = (".nsp", ".xci", ".nsz", ".xcz")
+          for n, link in sorted(found):
+              url, frag = urllib.parse.urldefrag(link)
+              name = urllib.parse.unquote(frag) if frag else urllib.parse.unquote(urllib.parse.urlparse(url).path.rsplit("/", 1)[-1])
+              name = name.replace("/", "_")
+              host = urllib.parse.urlparse(url).netloc.lower()
+              if host.endswith(("drive.google.com", "docs.google.com")) and not frag:
+                  name = "-"   # Google Drive: keep the file's own name from Drive
+              elif not name.lower().endswith(exts):
+                  name = f"download_{n}.nsp"
+              print(f"{n}\t{url}\t{name}")
+          PY
+          # the cache key: a hash of the links, so changing a link downloads fresh files
+          echo "hash=$(shasum -a 256 "$RUNNER_TEMP/links.tsv" | cut -c1-32)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore cached game files
+        id: cache
+        if: ${{ !inputs.refresh_cache }}
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/game
+          key: nxgame-${{ steps.links.outputs.hash }}
+
+      - name: Download game files
+        if: ${{ steps.cache.outputs.cache-hit != 'true' }}
+        run: |
+          set -eo pipefail
+          GAME_DIR="$HOME/game"
+          rm -rf "$GAME_DIR"
+          mkdir -p "$GAME_DIR"
+          while IFS=$'\t' read -r n url name; do
             if [ "$name" = "-" ] || [[ "$name" != *.nsp && "$name" != *.xci && "$name" != *.nsz ]]; then
               filename="game_${n}.nsp"
             else
