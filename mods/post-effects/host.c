@@ -17,7 +17,7 @@
 //                 DM_POSTFX_UI=0 turns this off
 //   cam_platform  the `cmp w8, #4` of the four battle camera Switch checks (param 0 BattleCamManager.BlurBackgroundCam, 1 BlurCharacterCam, 2 VignetteCharacterCam keep the PC-only blur and vignette off; param 3 ResetCamSetting makes the Switch build disable the camera behaviours of combat, which PC leaves enabled):
 //                 w8 = the platform type; a 4 becomes 2 so the game switches the background camera's v1 behaviour and starts BlurRoutine (depth of field of the character camera) and VignetteRoutine as on PC; DM_POSTFX_CAMBLUR=0 turns params 0-2 off;
-//                 param 3 (DM_POSTFX_COMBAT_PC, default 1, needs DM_POSTFX_COMBAT) skips the five Behaviour.set_enabled(false) calls as on PC, and while it is active bloom_pre leaves the combat bloom models exactly as the game made them (neither the story values nor the combat values below are written); a CamFilterController.SetFilter (stories) ends it; DM_POSTFX_COMBAT_PC=0 gives the combat_keep path back
+//                 param 3 (DM_POSTFX_COMBAT_PC, default 1, needs DM_POSTFX_COMBAT) skips the five Behaviour.set_enabled(false) calls as on PC, and while it is active bloom_pre leaves the combat bloom models as the game made them (neither the story values nor the combat values below are written) except that an enabled model's threshold above DM_POSTFX_COMBAT_MAXTHRESHOLD (0.9, the threshold the game itself uses on its one combat camera that blooms; 99 keeps the game's 1.1) is lowered to it; a CamFilterController.SetFilter (stories) ends it; DM_POSTFX_COMBAT_PC=0 gives the combat_keep path back
 //   models        the first OnPreCull of every v1 behaviour logs which of its profile's models are on (fog, depthOfField, motionBlur, bloom, colorGrading, vignette ...) and the depthOfField settings;
 //                 DM_POSTFX_DOF=1 switches the depthOfField model on for the combat behaviours combat_keep kept (default 0)
 //   probe         the entry of the other bloom sources (param: 1 v1 OnEnable, 3 v2 layer OnEnable, 4 v2 layer OnPreCull, 5 Bloom_RFX4.OnRenderImage, 6 RFX4_DistortionAndBloom.LateUpdate,
@@ -97,6 +97,7 @@ static uint8_t s_v1_antiflicker;
 static float s_v2_intensity = 1.0f, s_v2_threshold = 1.0f, s_v2_knee = 0.5f, s_v2_diffusion = 7.0f, s_v2_clamp = 65472.0f;
 static int s_v1_on = 1, s_v2_on = 0, s_v1_force = 0, s_story_on = 1, s_combat_on = 1, s_combat_mask = 25, s_ui_on = 1, s_cam_on = 1, s_dof_on = 0, s_combat_pc = 1;
 static volatile int s_pc_combat_active;
+static float s_combat_max_threshold = 0.9f;
 
 static float env_float(const char *name, float def) {
     const char *v = getenv(name);
@@ -133,6 +134,7 @@ static int mod_enabled(void) {
         s_cam_on = env_float("DM_POSTFX_CAMBLUR", 1) != 0;
         s_dof_on = env_float("DM_POSTFX_DOF", 0) != 0;
         s_combat_pc = env_float("DM_POSTFX_COMBAT_PC", 1) != 0;
+        s_combat_max_threshold = env_float("DM_POSTFX_COMBAT_MAXTHRESHOLD", s_combat_max_threshold);
         LOG("[mod post-effects] %s (DM_MOD_POSTEFFECTS=%s) v1 %s%s (intensity %.2f threshold %.2f knee %.2f radius %.2f) v2 %s (intensity %.2f threshold %.2f knee %.2f diffusion %.1f clamp %.0f) story %s combat %s (mask %d, game values %s) ui %s cam-blur %s dof-force %s",
             on ? "on" : "off", v ? v : "unset", s_v1_on ? "on" : "off", s_v1_force ? " forced" : "", s_v1_intensity, s_v1_threshold, s_v1_knee, s_v1_radius,
             s_v2_on ? "on" : "off", s_v2_intensity, s_v2_threshold, s_v2_knee, s_v2_diffusion, s_v2_clamp, s_story_on ? "on" : "off", s_combat_on ? "on" : "off", s_combat_mask, s_combat_pc ? "on" : "off", s_ui_on ? "on" : "off", s_cam_on ? "on" : "off", s_dof_on ? "on" : "off");
@@ -247,7 +249,14 @@ static void on_bloom_pre(uint64_t *r, int p) {
         LOG("[mod post-effects] v1 behaviour #%d first seen at OnPreCull #%d frame %llu: %p camera %p profile %p bloom model %p enabled %d intensity %.3f threshold %.3f knee %.3f radius %.3f antiflicker %d",
             nseen, hits, (unsigned long long)dm_nvn_frame_count(), (const void *)ppb, (const void *)ptr(ppb, F_PPB_CAMERA), (const void *)profile, (void *)bloom, was_on, was_i, was_t, f32(bloom, F_V1_KNEE), f32(bloom, F_V1_RADIUS), bloom[F_V1_ANTIFLICKER]);
     if (is_new) log_models(ppb, profile);
-    if (s_pc_combat_active) return;
+    if (s_pc_combat_active) {
+        if (was_on && was_t > s_combat_max_threshold) {
+            *(float *)(bloom + F_V1_THRESHOLD) = s_combat_max_threshold;
+            if (is_new)
+                LOG("[mod post-effects] combat: behaviour %p bloom threshold %.3f -> %.3f (a threshold above 1 is never reached by an 8-bit scene)", (const void *)ppb, was_t, s_combat_max_threshold);
+        }
+        return;
+    }
     if (!s_v1_on) return;
     if (!was_on || s_v1_force) {
         *(float *)(bloom + F_V1_INTENSITY) = s_v1_intensity;
