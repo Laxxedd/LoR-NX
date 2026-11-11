@@ -169,28 +169,36 @@ jobs:
       - name: Resolve download links
         id: links
         env:
-          ALL_SECRETS: ${{ toJSON(secrets) }}
+          ALL_SECRETS: ${{ toJSON(secrets) }}- name: Download game files
+        if: ${{ steps.cache.outputs.cache-hit != 'true' }}
         run: |
           set -eo pipefail
-          python3 - <<'PY' > "$RUNNER_TEMP/links.tsv"
-          import json, os, re, sys, urllib.parse
-          secrets = json.loads(os.environ["ALL_SECRETS"])
-          found = []
-          for key, val in secrets.items():
-              m = re.fullmatch(r"NSP_URL_(\d+)", key, re.I)
-              if m and val.strip():
-                  found.append((int(m.group(1)), val.strip()))
-          if not found:
-              sys.exit("No NSP_URL_1, NSP_URL_2, ... secrets found")
-          exts = (".nsp", ".xci", ".nsz", ".xcz")
-          for n, link in sorted(found):
-              url, frag = urllib.parse.urldefrag(link)
-              name = urllib.parse.unquote(frag) if frag else urllib.parse.unquote(urllib.parse.urlparse(url).path.rsplit("/", 1)[-1])
-              name = name.replace("/", "_")
-              host = urllib.parse.urlparse(url).netloc.lower()
-              if host.endswith(("drive.google.com", "docs.google.com")) and not frag:
-                  name = "-"   # Google Drive: keep the file's own name from Drive
-              elif not name.lower().endswith(exts):
+          GAME_DIR="$HOME/game"
+          rm -rf "$GAME_DIR"
+          mkdir -p "$GAME_DIR"
+          while IFS=$'\t' read -r n url name; do
+            # Ensure the output filename always ends in .nsp so the builder finds it
+            if [ "$name" = "-" ] || [[ "$name" != *.nsp && "$name" != *.xci && "$name" != *.nsz ]]; then
+              filename="game_${n}.nsp"
+            else
+              filename="$name"
+            fi
+
+            echo "Downloading #$n as $filename..."
+            case "$url" in
+              *drive.google.com*|*docs.google.com*)
+                id=$(echo "$url" | sed -nE 's#.*/d/([A-Za-z0-9_-]+).*#\1#p; s#.*[?&]id=([A-Za-z0-9_-]+).*#\1#p' | head -1)
+                if [ -z "$id" ]; then echo "::error::Can't find the file ID in link #$n"; exit 1; fi
+                echo "::add-mask::$id"
+                
+                # Use Google's direct usercontent endpoint with confirm=t to bypass the virus scan screen
+                curl -fSL --retry 5 --retry-delay 10 --retry-all-errors \
+                  -o "$GAME_DIR/$filename" \
+                  "https://drive.usercontent.google.com/download?id=${id}&export=download&confirm=t" ;;
+              *)
+                curl -fSL --retry 5 --retry-delay 10 --retry-all-errors -C - -o "$GAME_DIR/$filename" "$url" ;;
+            esac
+          done < "$RUNNER_TEMP/links.tsv"
                   name = f"download_{n}.nsp"
               print(f"{n}\t{url}\t{name}")
           PY
